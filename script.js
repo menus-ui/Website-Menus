@@ -31,6 +31,9 @@ function fmt(n) {
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
+function randRange(min, max) {
+  return min + Math.random() * (max - min);
+}
 
 /* ===================== STORAGE ===================== */
 let db = null;
@@ -79,6 +82,7 @@ function getUser(username) {
 
 /* ===================== SESSION ===================== */
 let currentUser = null; // username string
+let adminLoginMode = false; // true saat modal auth dibuka lewat akses admin rahasia
 
 function getSession() {
   try {
@@ -261,32 +265,41 @@ const SIDE_HIT = 1.7;
 const BOOST_LOCK_MS = 800;
 const TAKEOFF_DIST = 95;
 
+// Jarak tabrakan meteor & kecepatan awal meluncur diacak tiap ronde
+const TARGET_DIST_MIN = 110;
+const TARGET_DIST_MAX = 190;
+const LAUNCH_SPEED_MIN = 28;
+const LAUNCH_SPEED_MAX = 42;
+
+const IS_MOBILE = () => window.innerWidth <= 820;
+
 function initThree() {
   Game.scene = new THREE.Scene();
   Game.scene.fog = new THREE.FogExp2(0x05060f, 0.0022);
 
-  Game.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1600);
+  Game.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1200);
   Game.camera.position.set(0, 2.2, 13);
   Game.camera.lookAt(0, 0.6, -6);
 
-  Game.renderer = new THREE.WebGLRenderer({ antialias: true });
+  Game.renderer = new THREE.WebGLRenderer({
+    antialias: !IS_MOBILE(),
+    powerPreference: 'high-performance'
+  });
   Game.renderer.setSize(window.innerWidth, window.innerHeight);
-  Game.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  Game.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  Game.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  Game.renderer.shadowMap.enabled = false;
+  Game.renderer.toneMapping = IS_MOBILE() ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
   $('#game3d').appendChild(Game.renderer.domElement);
 
   Game.clock = new THREE.Clock();
 
-  // Lights
-  const hemi = new THREE.HemisphereLight(0x4466ff, 0x05060f, 0.7);
+  // Lights (dikurangi untuk performa: 1 hemi + 1 directional + 1 point)
+  const hemi = new THREE.HemisphereLight(0x4466ff, 0x05060f, 0.65);
   Game.scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 1.0);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
   dir.position.set(5, 12, 8);
   Game.scene.add(dir);
-  const rim = new THREE.PointLight(0xff2bd6, 0.8, 60);
-  rim.position.set(-6, 4, -4);
-  Game.scene.add(rim);
-  const cyan = new THREE.PointLight(0x00f0ff, 0.8, 60);
+  const cyan = new THREE.PointLight(0x00f0ff, 0.6, 55);
   cyan.position.set(6, -2, 8);
   Game.scene.add(cyan);
 
@@ -303,9 +316,10 @@ function onResize() {
   Game.camera.aspect = window.innerWidth / window.innerHeight;
   Game.camera.updateProjectionMatrix();
   Game.renderer.setSize(window.innerWidth, window.innerHeight);
+  Game.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 }
 
-/* ---------- ASTRONAUT MODEL (low-poly from primitives) ---------- */
+/* ---------- ASTRONAUT MODEL (low-poly dari primitives) ---------- */
 function buildAstronaut() {
   const g = new THREE.Group();
   const white = new THREE.MeshPhongMaterial({ color: 0xf4f7ff, shininess: 40 });
@@ -323,7 +337,7 @@ function buildAstronaut() {
   g.add(strip1);
 
   // Body
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.42, 1.1, 12), white);
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.42, 1.1, 10), white);
   body.position.set(0, 0, 0);
   g.add(body);
 
@@ -332,13 +346,13 @@ function buildAstronaut() {
   strap.position.set(0, 0.18, -0.1);
   g.add(strap);
 
-  // Helmet
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.48, 20, 20), white);
+  // Helmet (segment dikurangi -> low poly)
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.48, 12, 12), white);
   helmet.position.set(0, 0.95, 0);
   g.add(helmet);
 
   // Visor
-  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.32, 20, 20), glass);
+  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 10), glass);
   visor.position.set(0, 0.98, -0.28);
   visor.scale.set(1, 0.85, 0.8);
   g.add(visor);
@@ -362,7 +376,7 @@ function buildAstronaut() {
     const low = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.42, 8), armMat);
     low.position.set(0, -0.02, 0);
     a.add(low);
-    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), dark);
+    const glove = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), dark);
     glove.position.set(0, -0.3, 0);
     a.add(glove);
     a.position.set(side * 0.62, 0.45, 0);
@@ -410,9 +424,9 @@ function buildAstronaut() {
   Game.scene.add(g);
 }
 
-/* ---------- STARFIELD ---------- */
+/* ---------- STARFIELD (jumlah partikel dikurangi) ---------- */
 function buildStars() {
-  const count = 1600;
+  const count = 650;
   const pos = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const palette = [0xffffff, 0xaaccff, 0xffd24a, 0xff9ff2, 0x39ff8b];
@@ -428,7 +442,7 @@ function buildStars() {
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   const mat = new THREE.PointsMaterial({
-    size: 0.7,
+    size: 0.6,
     vertexColors: true,
     transparent: true,
     opacity: 0.9,
@@ -454,9 +468,9 @@ function moveStars(dt) {
   Game.stars.geometry.attributes.position.needsUpdate = true;
 }
 
-/* ---------- METEORS ---------- */
+/* ---------- METEORS (poly rendah & jumlah dikurangi) ---------- */
 function buildMeteor(scale, color) {
-  const geo = new THREE.IcosahedronGeometry(1, 2);
+  const geo = new THREE.IcosahedronGeometry(1, 1);
   const pos = geo.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
@@ -481,7 +495,7 @@ function buildMeteor(scale, color) {
     blending: THREE.AdditiveBlending,
     depthWrite: false
   });
-  const ring = new THREE.Mesh(new THREE.RingGeometry(1.1 * scale, 1.35 * scale, 20), rimMat);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.1 * scale, 1.35 * scale, 12), rimMat);
   ring.rotation.x = Math.PI / 2;
   mesh.add(ring);
   return mesh;
@@ -495,7 +509,7 @@ function buildMeteors() {
 
   // Side meteors
   Game.meteors = [];
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 6; i++) {
     const m = buildMeteor(0.8 + Math.random() * 1.2);
     m.position.set(spawnSideX(), randomSideY(), -140 - Math.random() * 560);
     m.userData = { spin: (Math.random() - 0.5) * 2, vy: 0 };
@@ -545,16 +559,16 @@ function updateMeteors(dt) {
   }
 }
 
-/* ---------- PARTICLES ---------- */
+/* ---------- PARTICLES (jumlah dikurangi) ---------- */
 function buildParticles() {
-  const count = 400;
+  const count = 180;
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(count * 3);
   const col = new Float32Array(count * 3);
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   const mat = new THREE.PointsMaterial({
-    size: 0.35,
+    size: 0.3,
     vertexColors: true,
     transparent: true,
     opacity: 0.9,
@@ -637,9 +651,11 @@ function clearParticles() {
 /* ---------- GAME STATE & LOGIC ---------- */
 function startRun(bet) {
   Game.bet = bet;
+  // Jarak tabrakan & kecepatan awal DIACAK tiap ronde agar tidak bisa dihafal
+  Game.targetDist = Math.round(randRange(TARGET_DIST_MIN, TARGET_DIST_MAX));
+  Game.speed = randRange(LAUNCH_SPEED_MIN, LAUNCH_SPEED_MAX);
   resetRun();
   Game.state = 'FLYING';
-  Game.speed = 34;
   Game.launchedAt = performance.now();
   Game.flame.visible = true;
   Audio.launch();
@@ -883,8 +899,14 @@ function login(username, password) {
     toast('Password salah!', 'error');
     return false;
   }
+  // Jika dibuka lewat akses admin rahasia, hanya akun admin yang bisa masuk
+  if (adminLoginMode && !u.isAdmin) {
+    toast('Kredensial admin tidak valid', 'error');
+    return false;
+  }
   currentUser = u.username;
   setSession(u.username);
+  adminLoginMode = false;
   Audio.coins();
   toast(`Selamat datang, ${u.username}!`, 'success');
   return true;
@@ -893,6 +915,7 @@ function login(username, password) {
 function logout() {
   currentUser = null;
   setSession(null);
+  adminLoginMode = false;
   if (Game.state !== 'IDLE') {
     Game.state = 'IDLE';
     resetRun();
@@ -937,6 +960,27 @@ function updateTokenUI() {
   if (!currentUser) return;
   const u = getUser(currentUser);
   $('#token-balance').textContent = fmt(u.tokens);
+}
+
+/* ===================== AKSES ADMIN RAHASIA ===================== */
+/* Tombol admin TIDAK terlihat di UI umum.
+   Akses admin dibuka lewat:
+     1) Menekan logo ASTRO BLAST 3 kali berturut-turut (dalam 1.5 detik)
+     2) Mengetik kombinasi rahasia "MENUS" (KeyM→KeyE→KeyN→KeyU→KeyS) */
+const ADMIN_SEQ = ['KeyM', 'KeyE', 'KeyN', 'KeyU', 'KeyS'];
+let adminSeqIdx = 0;
+let adminTapCount = 0;
+let adminTapTimer = null;
+
+function openAuthModal(admin) {
+  adminLoginMode = !!admin;
+  const title = $('#auth-modal-title');
+  title.textContent = admin ? '🔒 AKSES ADMIN' : '🚀 ASTRO BLAST';
+  title.classList.toggle('admin-mode', admin);
+  $('#tab-register').classList.toggle('hidden', admin);
+  switchAuthTab('login');
+  openModal('auth-modal');
+  if (admin) toast('Mode admin terbuka', 'info');
 }
 
 /* ===================== TOKEN REQUEST (PLAYER) ===================== */
@@ -1254,12 +1298,20 @@ function bindUI() {
     }
   });
 
-  $('#btn-login').addEventListener('click', () => {
-    openModal('auth-modal');
+  $('#btn-login').addEventListener('click', () => openAuthModal(false));
+  $('#btn-start').addEventListener('click', () => openAuthModal(false));
+
+  // Akses admin rahasia: tekan logo 3x berturut-turut
+  $('#nav-logo').addEventListener('click', () => {
+    adminTapCount++;
+    if (adminTapTimer) clearTimeout(adminTapTimer);
+    adminTapTimer = setTimeout(() => { adminTapCount = 0; }, 1500);
+    if (adminTapCount >= 3) {
+      adminTapCount = 0;
+      openAuthModal(true);
+    }
   });
-  $('#btn-start').addEventListener('click', () => {
-    openModal('auth-modal');
-  });
+
   $('#btn-logout').addEventListener('click', logout);
   $('#btn-dashboard').addEventListener('click', () => {
     renderAdminDashboard();
@@ -1357,6 +1409,21 @@ function bindUI() {
   // Keyboard
   window.addEventListener('keydown', (e) => {
     Audio.init(); Audio.resume();
+
+    // Kombinasi rahasia admin: ketik "MENUS" berurutan (saat tidak terbang)
+    if (Game.state !== 'FLYING') {
+      let matched = false;
+      if (e.code === ADMIN_SEQ[adminSeqIdx]) {
+        adminSeqIdx++;
+        matched = true;
+        if (adminSeqIdx === ADMIN_SEQ.length) {
+          adminSeqIdx = 0;
+          openAuthModal(true);
+        }
+      }
+      if (!matched) adminSeqIdx = 0;
+    }
+
     if (e.code === 'Space') {
       e.preventDefault();
       if (Game.state === 'FLYING') stopAstronaut();

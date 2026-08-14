@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>ASTRO BLAST :: Space Token Game</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,7 +19,7 @@
 
   <!-- ============ NAVBAR ============ -->
   <header id="navbar">
-    <div class="nav-logo">
+    <div class="nav-logo" id="nav-logo">
       <span class="logo-icon">&#128640;</span>
       <span class="logo-text">ASTRO<span class="accent">BLAST</span></span>
     </div>
@@ -107,7 +107,7 @@
   <div class="modal-overlay hidden" id="auth-modal">
     <div class="modal-box">
       <button class="modal-close" data-close="auth-modal">&times;</button>
-      <div class="modal-title">&#128640; ASTRO BLAST</div>
+      <div class="modal-title" id="auth-modal-title">&#128640; ASTRO BLAST</div>
       <div class="auth-tabs">
         <button class="auth-tab active" id="tab-login" data-tab="login">MASUK</button>
         <button class="auth-tab" id="tab-register" data-tab="register">DAFTAR</button>
@@ -119,7 +119,6 @@
         <label>Password</label>
         <input type="password" id="login-pass" autocomplete="current-password" required>
         <button type="submit" class="btn-submit">MASUK</button>
-        <div class="admin-hint">Akun Admin default: <b>menus233</b> / <b>12345</b></div>
       </form>
 
       <form id="form-register" class="auth-form hidden">

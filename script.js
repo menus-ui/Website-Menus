@@ -1,24 +1,53 @@
 /* ============================================================
-   ASTRO BLAST :: Space Token Game
+   ASTRO BLAST :: Space Token Game — OVERHAUL
    - Three.js 3D (r128 via CDN, global THREE)
-   - Web Audio API synthesizer
-   - Auth system (admin + users)
-   - Token system (requests, approve/reject, direct grant)
-   - localStorage persistence
+   - Firebase Realtime Database via CDN (sync antar HP)
+   - Gameplay Insting: TANPA indikator jarak meteor,
+     meteor kecohan (decoy), skenario tabrakan acak,
+     kecepatan luncur acak (lambat lalu melesat)
+   - UI Mobile-first: navbar hamburger, panel bawah compact
    ============================================================ */
 'use strict';
+
+/* ===================== FIREBASE CONFIG (GANTI DENGAN PUNYA ANDA) ===================== */
+/* Setiap field di bawah berisi nilai dummy.
+   Agar sinkron antar-HP aktif, isi nilai API Key milik Anda sendiri dari Firebase Console.
+   Jika masih dummy ('YOUR_...'), game otomatis berjalan dalam MODE LOKAL (localStorage). */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyB3Np8kRiEPRZS_UhVnRHElAASvm6OKn6o",
+  authDomain: "menus-c9b72.firebaseapp.com",
+  databaseURL: "https://menus-c9b72-default-rtdb.firebaseio.com",
+  projectId: "menus-c9b72",
+  storageBucket: "menus-c9b72.firebasestorage.app",
+  messagingSenderId: "513300499190",
+  appId: "1:513300499190:web:08469462debca670bafad7",
+  measurementId: "G-5C6VTZDDTV"
+};
+
+/* ===================== CONSTANTS ===================== */
+const USERS_KEY = 'astro_blast_users_v2';
+const REQUESTS_KEY = 'astro_blast_requests_v2';
+const STORAGE_KEY = 'astro_blast_data_v1';       // legacy migrasi
+const SESSION_KEY = 'astro_blast_session_v2';
+const ADMIN_USER = 'menus233';
+const ADMIN_PASS = '12345';
+
+const PERFECT_ZONE = 18;   // batas "perfect stop" (di skala tersembunyi)
+const SAFE_ZONE = 52;      // batas "safe stop"
+const CRASH_DIST = 2;
+const BOOST_LOCK_MS = 800;
+
+const FIREBASE_ENABLED = () =>
+  !!(window.firebase &&
+    FIREBASE_CONFIG.apiKey &&
+    FIREBASE_CONFIG.apiKey.indexOf('YOUR_') === -1 &&
+    FIREBASE_CONFIG.databaseURL.indexOf('YOUR_') === -1);
+
+const IS_MOBILE = () => window.innerWidth <= 820;
 
 /* ===================== HELPERS ===================== */
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
-
-// Struktur data global di localStorage
-const USERS_KEY = 'astro_blast_users_v1';       // usersData
-const REQUESTS_KEY = 'astro_blast_requests_v1'; // tokenRequestsData
-const STORAGE_KEY = 'astro_blast_data_v1';      // legacy (hanya untuk migrasi)
-const SESSION_KEY = 'astro_blast_session_v1';
-const ADMIN_USER = 'menus233';
-const ADMIN_PASS = '12345';
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -37,42 +66,136 @@ function clamp(v, min, max) {
 function randRange(min, max) {
   return min + Math.random() * (max - min);
 }
-
-/* ===================== STORAGE ===================== */
-let db = { users: {} };          // usersData: objek user (key = username)
-let tokenRequestsData = [];      // tokenRequestsData: array permintaan token global
-
-function usersData() {
-  return db.users;
+function mkUser(username, password, tokens, isAdmin) {
+  return {
+    username,
+    password,
+    tokens: tokens || 0,
+    isAdmin: !!isAdmin,
+    createdAt: nowStr(),
+    lastSeen: Date.now(),
+    stats: { wins: 0, losses: 0, perfects: 0, gamesPlayed: 0 },
+    history: []
+  };
+}
+function sanitizeUser(u) {
+  return {
+    username: u.username,
+    password: u.password,
+    tokens: u.tokens,
+    isAdmin: !!u.isAdmin,
+    createdAt: u.createdAt || '',
+    lastSeen: u.lastSeen || Date.now(),
+    stats: u.stats || { wins: 0, losses: 0, perfects: 0, gamesPlayed: 0 },
+    history: (u.history || []).slice(0, 50)
+  };
+}
+function isOnline(u) {
+  return !!(u && u.lastSeen && (Date.now() - u.lastSeen < 60000));
 }
 
-function loadDB() {
-  try {
-    const rawUsers = localStorage.getItem(USERS_KEY);
-    db.users = rawUsers ? JSON.parse(rawUsers) : {};
-    const rawReqs = localStorage.getItem(REQUESTS_KEY);
-    tokenRequestsData = rawReqs ? JSON.parse(rawReqs) : [];
-  } catch (e) {
-    db.users = {};
-    tokenRequestsData = [];
+/* ===================== STORAGE ENGINE (Firebase + localStorage fallback) ===================== */
+const S = {
+  users: {},
+  requests: [],
+  fbEnabled: false,
+  root: null,
+
+  init() {
+    // 1) Muat cache lokal untuk tampilan instan
+    try {
+      const rawU = localStorage.getItem(USERS_KEY);
+      if (rawU) S.users = JSON.parse(rawU);
+      const rawR = localStorage.getItem(REQUESTS_KEY);
+      if (rawR) S.requests = JSON.parse(rawR);
+    } catch (e) { S.users = {}; S.requests = []; }
+    migrateLegacyData();
+    S.ensureAdmin();
+
+    // 2) Aktifkan Firebase bila dikonfigurasi
+    if (FIREBASE_ENABLED()) {
+      try {
+        firebase.initializeApp(FIREBASE_CONFIG);
+        S.root = firebase.database();
+        S.fbEnabled = true;
+        S.saveUser(S.users[ADMIN_USER]); // pastikan admin tersedia di cloud
+        S.watchUsers();
+        S.watchRequests();
+      } catch (e) {
+        console.warn('Firebase init gagal, mode lokal aktif.', e);
+        S.fbEnabled = false;
+      }
+    }
+    S.persistLocal();
+  },
+
+  ensureAdmin() {
+    if (!S.users[ADMIN_USER]) S.users[ADMIN_USER] = mkUser(ADMIN_USER, ADMIN_PASS, 100000, true);
+    else if (S.users[ADMIN_USER].isAdmin !== true) S.users[ADMIN_USER].isAdmin = true;
+  },
+
+  persistLocal() {
+    try {
+      localStorage.setItem(USERS_KEY, JSON.stringify(S.users));
+      localStorage.setItem(REQUESTS_KEY, JSON.stringify(S.requests));
+    } catch (e) { /* storage penuh */ }
+  },
+
+  saveUser(u) {
+    S.users[u.username] = u;
+    S.persistLocal();
+    if (S.fbEnabled && S.root) {
+      S.root.ref('users/' + u.username).set(sanitizeUser(u));
+    }
+  },
+
+  removeUser(username) {
+    delete S.users[username];
+    S.persistLocal();
+    if (S.fbEnabled && S.root) S.root.ref('users/' + username).remove();
+  },
+
+  pushRequest(req) {
+    S.requests.push(req);
+    S.persistLocal();
+    if (S.fbEnabled && S.root) S.root.ref('requests/' + req.id).set(req);
+  },
+
+  updateRequest(id, patch) {
+    const r = S.requests.find((x) => x.id === id);
+    if (r) Object.assign(r, patch);
+    S.persistLocal();
+    if (S.fbEnabled && S.root) S.root.ref('requests/' + id).update(patch);
+  },
+
+  clearAll() {
+    S.users = {};
+    S.requests = [];
+    S.persistLocal();
+    if (S.fbEnabled && S.root) {
+      S.root.ref('users').remove();
+      S.root.ref('requests').remove();
+    }
+  },
+
+  // Listener real-time: user baru dari HP manapun langsung muncul di dashboard admin
+  watchUsers() {
+    S.root.ref('users').on('value', (snap) => {
+      S.users = snap.val() || {};
+      S.ensureAdmin();
+      S.persistLocal();
+      onDataSync();
+    });
+  },
+
+  watchRequests() {
+    S.root.ref('requests').on('value', (snap) => {
+      S.requests = snap.val() ? Object.values(snap.val()) : [];
+      S.persistLocal();
+      onDataSync();
+    });
   }
-  // Migrasi data dari versi lama (satu objek db) bila masih ada
-  migrateLegacyData();
-  // Pastikan akun admin selalu tersedia
-  if (!db.users[ADMIN_USER]) addUserRecord(ADMIN_USER, ADMIN_PASS, 100000, true);
-  saveDB();
-}
-
-function loadFresh() {
-  // Baca ulang data TERBARU langsung dari localStorage
-  // Dipanggil tiap kali Admin membuka dashboard / interval real-time
-  try {
-    const rawUsers = localStorage.getItem(USERS_KEY);
-    if (rawUsers) db.users = JSON.parse(rawUsers);
-    const rawReqs = localStorage.getItem(REQUESTS_KEY);
-    if (rawReqs) tokenRequestsData = JSON.parse(rawReqs);
-  } catch (e) { /* corrupted */ }
-}
+};
 
 function migrateLegacyData() {
   try {
@@ -81,67 +204,32 @@ function migrateLegacyData() {
     const old = JSON.parse(raw);
     if (old && old.users) {
       Object.entries(old.users).forEach(([name, u]) => {
-        if (!db.users[name]) {
-          db.users[name] = {
-            username: name,
-            password: u.password || '1234',
-            tokens: u.tokens || 0,
-            isAdmin: !!u.isAdmin,
-            createdAt: u.createdAt || nowStr(),
-            stats: u.stats || { wins: 0, losses: 0, perfects: 0, gamesPlayed: 0 },
-            history: u.history || []
-          };
+        if (!S.users[name]) {
+          S.users[name] = mkUser(name, u.password || '1234', u.tokens || 0, !!u.isAdmin);
+          S.users[name].stats = u.stats || { wins: 0, losses: 0, perfects: 0, gamesPlayed: 0 };
+          S.users[name].history = u.history || [];
         }
-        // Pindahkan request lama (per-user) ke tokenRequestsData global
         (u.requests || []).forEach((r) => {
-          if (!tokenRequestsData.some((t) => t.id === r.id)) {
-            tokenRequestsData.push({ id: r.id || uid(), username: name, amount: r.amount, status: r.status || 'pending', date: r.date || nowStr() });
+          if (!S.requests.some((t) => t.id === r.id)) {
+            S.requests.push({ id: r.id || uid(), username: name, amount: r.amount, status: r.status || 'pending', date: r.date || nowStr() });
           }
         });
       });
     }
     localStorage.removeItem(STORAGE_KEY);
-  } catch (e) { /* corrupted legacy */ }
-}
-
-function seedDB() {
-  db.users = {};
-  tokenRequestsData = [];
-  addUserRecord(ADMIN_USER, ADMIN_PASS, 100000, true);
-  saveDB();
-}
-
-function addUserRecord(username, password, tokens, isAdmin) {
-  db.users[username] = {
-    username,
-    password,
-    tokens: tokens || 0,
-    isAdmin: !!isAdmin,
-    createdAt: nowStr(),
-    stats: { wins: 0, losses: 0, perfects: 0, gamesPlayed: 0 },
-    history: []
-  };
-}
-
-function saveDB() {
-  try {
-    localStorage.setItem(USERS_KEY, JSON.stringify(db.users));
-    localStorage.setItem(REQUESTS_KEY, JSON.stringify(tokenRequestsData));
-  } catch (e) { /* full storage */ }
+  } catch (e) { /* legacy korup */ }
 }
 
 function getUser(username) {
-  return db.users[username] || null;
+  return S.users[username] || null;
 }
 
 /* ===================== SESSION ===================== */
-let currentUser = null; // username string
-let adminLoginMode = false; // true saat modal auth dibuka lewat akses admin rahasia
+let currentUser = null;
+let adminLoginMode = false;
 
 function getSession() {
-  try {
-    return localStorage.getItem(SESSION_KEY);
-  } catch (e) { return null; }
+  try { return localStorage.getItem(SESSION_KEY); } catch (e) { return null; }
 }
 function setSession(u) {
   try {
@@ -153,7 +241,6 @@ function restoreSession() {
   const u = getSession();
   if (u && getUser(u)) {
     currentUser = u;
-    applyLoginUI();
     return true;
   }
   return false;
@@ -174,7 +261,6 @@ const Audio = {
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.6;
       this.master.connect(this.ctx.destination);
-      // noise buffer
       const len = this.ctx.sampleRate * 1.5;
       this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
       const data = this.noiseBuf.getChannelData(0);
@@ -220,19 +306,16 @@ const Audio = {
   },
 
   click() { this.tone(600, 0.06, 'square', 0.08); },
-
   launch() {
     this.noise(1.1, 0.25, 'bandpass', 300, { slide: 2400, rate: 1.4 });
     this.tone(90, 1.2, 'sawtooth', 0.12, { slide: 420 });
   },
-
   safeWin() {
     this.tone(523.25, 0.12, 'triangle', 0.18);
     setTimeout(() => this.tone(659.25, 0.12, 'triangle', 0.18), 110);
     setTimeout(() => this.tone(783.99, 0.2, 'triangle', 0.2), 220);
     setTimeout(() => this.tone(1046.5, 0.3, 'triangle', 0.16), 330);
   },
-
   perfectWin() {
     const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
     notes.forEach((n, i) => {
@@ -244,19 +327,16 @@ const Audio = {
     this.noise(1.4, 0.08, 'highpass', 5000, { slide: 8000 });
     this.tone(1568, 0.5, 'sine', 0.08);
   },
-
   explosion() {
     this.noise(1.0, 0.5, 'lowpass', 1500, { slide: 60 });
     this.tone(70, 0.8, 'sine', 0.35, { slide: 28 });
     this.tone(200, 0.4, 'sawtooth', 0.1, { slide: 40 });
   },
-
   lose() {
     this.tone(392, 0.2, 'sawtooth', 0.12);
     setTimeout(() => this.tone(330, 0.2, 'sawtooth', 0.12), 180);
     setTimeout(() => this.tone(262, 0.4, 'sawtooth', 0.14), 360);
   },
-
   requestSent() { this.tone(880, 0.12, 'sine', 0.14); setTimeout(() => this.tone(1320, 0.18, 'sine', 0.12), 120); },
   coins() {
     this.tone(988, 0.08, 'square', 0.1);
@@ -284,9 +364,6 @@ function openModal(id) {
 function closeModal(id) {
   $('#' + id).classList.add('hidden');
 }
-function closeAllModals() {
-  $$('.modal-overlay').forEach((m) => m.classList.add('hidden'));
-}
 
 /* ===================== THREE.JS 3D GAME ===================== */
 const Game = {
@@ -297,11 +374,14 @@ const Game = {
   astronaut: null,
   flame: null,
   stars: null,
-  meteors: [],
   target: null,
+  targetRealMat: null,
+  targetDecoyMat: null,
+  decoys: [],
+  decoyMats: [],
   particles: null,
   particleData: [],
-  speed: 0,
+  currentSpeed: 30,
   ambientSpeed: 8,
   state: 'IDLE', // IDLE | FLYING | RESULT
   bet: 0,
@@ -309,27 +389,20 @@ const Game = {
   shakeAmp: 0,
   steerX: 0,
   steerY: 0,
-  targetDist: 140,
+  scenario: 'NORMAL',
+  visualStart: 140,
+  visualRemaining: 140,
+  hiddenStart: 100,
+  hiddenRemaining: 100,
+  hiddenRate: 1,
+  isDecoy: false,
+  speedProfile: [{ below: 1e9, speed: 36 }],
   idleT: 0
 };
 
-const PERFECT_ZONE = 40;
-const CRASH_DIST = 3;
-const SIDE_HIT = 1.7;
-const BOOST_LOCK_MS = 800;
-const TAKEOFF_DIST = 95;
-
-// Jarak tabrakan meteor & kecepatan awal meluncur diacak tiap ronde
-const TARGET_DIST_MIN = 110;
-const TARGET_DIST_MAX = 190;
-const LAUNCH_SPEED_MIN = 28;
-const LAUNCH_SPEED_MAX = 42;
-
-const IS_MOBILE = () => window.innerWidth <= 820;
-
 function initThree() {
   Game.scene = new THREE.Scene();
-  Game.scene.fog = new THREE.FogExp2(0x05060f, 0.0022);
+  Game.scene.fog = new THREE.FogExp2(0x05060f, 0.002);
 
   Game.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1200);
   Game.camera.position.set(0, 2.2, 13);
@@ -340,20 +413,19 @@ function initThree() {
     powerPreference: 'high-performance'
   });
   Game.renderer.setSize(window.innerWidth, window.innerHeight);
-  Game.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  Game.renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_MOBILE() ? 1.4 : 1.5));
   Game.renderer.shadowMap.enabled = false;
   Game.renderer.toneMapping = IS_MOBILE() ? THREE.NoToneMapping : THREE.ACESFilmicToneMapping;
   $('#game3d').appendChild(Game.renderer.domElement);
 
   Game.clock = new THREE.Clock();
 
-  // Lights (dikurangi untuk performa: 1 hemi + 1 directional + 1 point)
-  const hemi = new THREE.HemisphereLight(0x4466ff, 0x05060f, 0.65);
+  const hemi = new THREE.HemisphereLight(0x4466ff, 0x05060f, 0.6);
   Game.scene.add(hemi);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
   dir.position.set(5, 12, 8);
   Game.scene.add(dir);
-  const cyan = new THREE.PointLight(0x00f0ff, 0.6, 55);
+  const cyan = new THREE.PointLight(0x00f0ff, 0.5, 55);
   cyan.position.set(6, -2, 8);
   Game.scene.add(cyan);
 
@@ -370,7 +442,7 @@ function onResize() {
   Game.camera.aspect = window.innerWidth / window.innerHeight;
   Game.camera.updateProjectionMatrix();
   Game.renderer.setSize(window.innerWidth, window.innerHeight);
-  Game.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  Game.renderer.setPixelRatio(Math.min(window.devicePixelRatio, IS_MOBILE() ? 1.4 : 1.5));
 }
 
 /* ---------- ASTRONAUT MODEL (low-poly dari primitives) ---------- */
@@ -382,7 +454,6 @@ function buildAstronaut() {
   const glowCyan = new THREE.MeshPhongMaterial({ color: 0x00f0ff, emissive: 0x00f0ff, emissiveIntensity: 0.9 });
   const glass = new THREE.MeshPhongMaterial({ color: 0x1a3a5a, emissive: 0x00d4ff, emissiveIntensity: 0.25, transparent: true, opacity: 0.75, shininess: 90 });
 
-  // Backpack (jetpack)
   const pack = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.0, 0.4), gray);
   pack.position.set(0, 0.15, 0.45);
   g.add(pack);
@@ -390,28 +461,22 @@ function buildAstronaut() {
   strip1.position.set(0, 0.5, 0.46);
   g.add(strip1);
 
-  // Body
   const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.42, 1.1, 10), white);
-  body.position.set(0, 0, 0);
   g.add(body);
 
-  // Chest strap
   const strap = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.12, 0.42), glowCyan);
   strap.position.set(0, 0.18, -0.1);
   g.add(strap);
 
-  // Helmet (segment dikurangi -> low poly)
   const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.48, 12, 12), white);
   helmet.position.set(0, 0.95, 0);
   g.add(helmet);
 
-  // Visor
   const visor = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 10), glass);
   visor.position.set(0, 0.98, -0.28);
   visor.scale.set(1, 0.85, 0.8);
   g.add(visor);
 
-  // Antenna
   const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3), gray);
   ant.position.set(0.25, 1.42, 0);
   g.add(ant);
@@ -420,14 +485,12 @@ function buildAstronaut() {
   antLight.position.set(0.25, 1.6, 0);
   g.add(antLight);
 
-  // Arms
-  const armMat = white;
   const mkArm = (side) => {
     const a = new THREE.Group();
-    const up = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.45, 8), armMat);
+    const up = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.45, 8), white);
     up.position.set(0, 0.22, 0);
     a.add(up);
-    const low = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.42, 8), armMat);
+    const low = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.42, 8), white);
     low.position.set(0, -0.02, 0);
     a.add(low);
     const glove = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), dark);
@@ -437,12 +500,9 @@ function buildAstronaut() {
     a.rotation.z = side * -0.25;
     return a;
   };
-  const armL = mkArm(-1);
-  const armR = mkArm(1);
-  g.add(armL);
-  g.add(armR);
+  g.add(mkArm(-1));
+  g.add(mkArm(1));
 
-  // Legs
   const mkLeg = (side) => {
     const l = new THREE.Group();
     const thigh = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.13, 0.4, 8), white);
@@ -459,7 +519,6 @@ function buildAstronaut() {
   g.add(mkLeg(-1));
   g.add(mkLeg(1));
 
-  // Jetpack flame (scales with speed)
   const flameMat = new THREE.MeshBasicMaterial({
     color: 0x00f0ff,
     transparent: true,
@@ -480,7 +539,7 @@ function buildAstronaut() {
 
 /* ---------- STARFIELD (jumlah partikel dikurangi) ---------- */
 function buildStars() {
-  const count = 650;
+  const count = 500;
   const pos = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const palette = [0xffffff, 0xaaccff, 0xffd24a, 0xff9ff2, 0x39ff8b];
@@ -510,7 +569,7 @@ function buildStars() {
 
 function moveStars(dt) {
   const p = Game.stars.geometry.attributes.position.array;
-  const speed = Game.state === 'FLYING' ? Game.speed * 1.35 : Game.ambientSpeed;
+  const speed = Game.state === 'FLYING' ? Game.currentSpeed * 1.25 : Game.ambientSpeed;
   for (let i = 0; i < p.length; i += 3) {
     p[i + 2] += speed * dt;
     if (p[i + 2] > 30) {
@@ -522,8 +581,8 @@ function moveStars(dt) {
   Game.stars.geometry.attributes.position.needsUpdate = true;
 }
 
-/* ---------- METEORS (poly rendah & jumlah dikurangi) ---------- */
-function buildMeteor(scale, color) {
+/* ---------- METEOR TARGET & METEOR KECOHAAN (decoy field) ---------- */
+function buildMeteors() {
   const geo = new THREE.IcosahedronGeometry(1, 1);
   const pos = geo.attributes.position;
   const v = new THREE.Vector3();
@@ -534,14 +593,13 @@ function buildMeteor(scale, color) {
     pos.setXYZ(i, v.x, v.y, v.z);
   }
   geo.computeVertexNormals();
-  const mat = new THREE.MeshPhongMaterial({
-    color: color || 0x8a5a3a,
-    emissive: 0x331a0a,
-    shininess: 12
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.scale.setScalar(scale);
-  // glowing rim (additive sprite ring)
+
+  // Target meteor: punya 2 material — asli & kecohan (hologram)
+  Game.targetRealMat = new THREE.MeshPhongMaterial({ color: 0x9a6a3a, emissive: 0x331a0a, shininess: 12 });
+  Game.targetDecoyMat = new THREE.MeshPhongMaterial({ color: 0x00f0ff, emissive: 0x00c8ff, transparent: true, opacity: 0.45, shininess: 40 });
+
+  Game.target = new THREE.Mesh(geo, Game.targetRealMat);
+  Game.target.scale.setScalar(2.4);
   const rimMat = new THREE.MeshBasicMaterial({
     color: 0xff7a3c,
     transparent: true,
@@ -549,73 +607,45 @@ function buildMeteor(scale, color) {
     blending: THREE.AdditiveBlending,
     depthWrite: false
   });
-  const ring = new THREE.Mesh(new THREE.RingGeometry(1.1 * scale, 1.35 * scale, 12), rimMat);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(2.4 * 1.1, 2.4 * 1.35, 12), rimMat);
   ring.rotation.x = Math.PI / 2;
-  mesh.add(ring);
-  return mesh;
-}
-
-function buildMeteors() {
-  // Target meteor (big, homing)
-  Game.target = buildMeteor(2.4, 0x9a6a3a);
-  Game.target.position.set(0, 0, -Game.targetDist);
+  Game.target.add(ring);
+  Game.target.position.set(0, 0, -Game.visualStart);
   Game.scene.add(Game.target);
 
-  // Side meteors
-  Game.meteors = [];
-  for (let i = 0; i < 6; i++) {
-    const m = buildMeteor(0.8 + Math.random() * 1.2);
-    m.position.set(spawnSideX(), randomSideY(), -140 - Math.random() * 560);
-    m.userData = { spin: (Math.random() - 0.5) * 2, vy: 0 };
+  // Banyak meteor kecohan melayang (tanpa ring agar ringan)
+  const decoyColors = [0x8a5a3a, 0x6b7287, 0x9a6a3a, 0x555a6e, 0x7a5a3a];
+  Game.decoyMats = decoyColors.map((c) => new THREE.MeshPhongMaterial({ color: c, emissive: 0x1a0e05, shininess: 12 }));
+  Game.decoys = [];
+  for (let i = 0; i < 12; i++) {
+    const m = new THREE.Mesh(geo, Game.decoyMats[i % Game.decoyMats.length]);
+    m.userData = { spinX: (Math.random() - 0.5) * 2, spinY: (Math.random() - 0.5) * 2 };
     Game.scene.add(m);
-    Game.meteors.push(m);
+    Game.decoys.push(m);
+    resetDecoy(m);
   }
 }
 
-function spawnSideX() {
+function resetDecoy(m) {
   const side = Math.random() < 0.5 ? -1 : 1;
-  return side * (3.2 + Math.random() * 9);
-}
-function randomSideY() {
-  return (Math.random() - 0.5) * 9;
-}
-
-function resetRun() {
-  Game.target.position.set(0, 0, -Game.targetDist);
-  Game.astronaut.position.set(0, 0, 0);
-  Game.astronaut.rotation.z = 0;
-  for (const m of Game.meteors) {
-    m.position.set(spawnSideX(), randomSideY(), -140 - Math.random() * 560);
-    m.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-  }
-  clearParticles();
+  m.position.set(side * (2.5 + Math.random() * 12), (Math.random() - 0.5) * 10, -40 - Math.random() * 420);
+  m.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+  m.scale.setScalar(0.7 + Math.random() * 1.8);
 }
 
-function updateMeteors(dt) {
-  const speed = Game.state === 'FLYING' ? Game.speed : Game.ambientSpeed * 0.4;
-  // target homing toward astronaut x/y while flying
-  const target = Game.target;
-  target.position.z += speed * dt;
-  if (Game.state === 'FLYING') {
-    target.position.x += (Game.astronaut.position.x - target.position.x) * 0.06;
-    target.position.y += (Game.astronaut.position.y - target.position.y) * 0.06;
-  }
-  target.rotation.y += dt * 0.6;
-  target.rotation.x += dt * 0.3;
-
-  for (const m of Game.meteors) {
-    m.position.z += speed * dt;
-    m.rotation.x += m.userData.spin * dt;
-    m.rotation.y += m.userData.spin * dt * 0.7;
-    if (m.position.z > 26) {
-      m.position.set(spawnSideX(), randomSideY(), -140 - Math.random() * 560);
-    }
+function updateDecoys(dt) {
+  const speed = Game.state === 'FLYING' ? Game.currentSpeed : Game.ambientSpeed * 0.5;
+  for (const d of Game.decoys) {
+    d.position.z += speed * dt;
+    d.rotation.x += d.userData.spinX * dt;
+    d.rotation.y += d.userData.spinY * dt;
+    if (d.position.z > 26) resetDecoy(d);
   }
 }
 
 /* ---------- PARTICLES (jumlah dikurangi) ---------- */
 function buildParticles() {
-  const count = 180;
+  const count = 140;
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(count * 3);
   const col = new Float32Array(count * 3);
@@ -683,10 +713,9 @@ function updateParticles(dt) {
     p.vx *= (1 - 1.8 * dt); p.vy *= (1 - 1.8 * dt); p.vz *= (1 - 1.8 * dt);
     positions[i * 3] = p.x; positions[i * 3 + 1] = p.y; positions[i * 3 + 2] = p.z;
     const fade = 1 - k;
-    colors[i * 3] = p.r + (p.r2 - p.r) * k;
-    colors[i * 3 + 1] = p.g + (p.g2 - p.g) * k;
-    colors[i * 3 + 2] = p.b + (p.b2 - p.b) * k;
-    colors[i * 3] *= fade; colors[i * 3 + 1] *= fade; colors[i * 3 + 2] *= fade;
+    colors[i * 3] = (p.r + (p.r2 - p.r) * k) * fade;
+    colors[i * 3 + 1] = (p.g + (p.g2 - p.g) * k) * fade;
+    colors[i * 3 + 2] = (p.b + (p.b2 - p.b) * k) * fade;
     alive++;
   }
   if (alive === 0) {
@@ -702,12 +731,98 @@ function clearParticles() {
   Game.particles.visible = false;
 }
 
-/* ---------- GAME STATE & LOGIC ---------- */
+/* ============================================================
+   GAMEPLAY INSTING — SKENARIO TABRAKAN ACAK & KECEPATAN ACAK
+   Pemain TIDAK diberi tahu jarak (meter) ke meteor.
+   Yang terlihat hanyalah meteor visual + banyak kecohan.
+   ============================================================ */
+function buildSpeedProfile(scenario) {
+  if (scenario === 'A') {
+    // Skenario A: meteor muncul mendadak sangat dekat & sangat cepat
+    return [{ below: 100, speed: randRange(62, 92) }];
+  }
+  if (scenario === 'C') {
+    // Skenario C: lambat di awal lalu tiba-tiba melesat
+    const burst = randRange(75, 108);
+    const base = randRange(20, 26);
+    return [
+      { below: randRange(26, 40), speed: burst },
+      { below: randRange(58, 92), speed: base * 2 },
+      { below: 1e9, speed: base }
+    ];
+  }
+  // Normal
+  return [{ below: 1e9, speed: randRange(32, 46) }];
+}
+
+function rollRound() {
+  const r = Math.random();
+  const scenario = r < 0.34 ? 'A' : (r < 0.68 ? 'B' : 'C');
+  let visualStart, hiddenStart, hiddenRate = 1;
+
+  if (scenario === 'A') {
+    // Skenario A — mendadak dekat di depan mata
+    visualStart = randRange(38, 80);
+    hiddenStart = randRange(26, 90);
+    hiddenRate = randRange(0.9, 1.35);
+  } else if (scenario === 'B') {
+    // Skenario B — meteor visual hanyalah kecohan/bayangan
+    visualStart = randRange(110, 200);
+    hiddenStart = randRange(40, 170);
+    if (Math.random() < 0.5) {
+      hiddenRate = randRange(1.35, 1.9);   // titik tabrakan LEBIH DEKAT dari yang terlihat
+    } else {
+      hiddenRate = randRange(0.5, 0.85);   // titik tabrakan LEBIH JAUH dari yang terlihat
+    }
+  } else {
+    // Skenario C — kecepatan luncur acak
+    visualStart = randRange(90, 180);
+    hiddenStart = randRange(50, 150);
+    hiddenRate = randRange(0.95, 1.2);
+  }
+
+  return {
+    scenario,
+    visualStart,
+    hiddenStart,
+    hiddenRate,
+    profile: buildSpeedProfile(scenario)
+  };
+}
+
+function speedAt(vr) {
+  for (const seg of Game.speedProfile) {
+    if (vr <= seg.below) return seg.speed;
+  }
+  return Game.speedProfile[Game.speedProfile.length - 1].speed;
+}
+
+function resetRun() {
+  const r = rollRound();
+  Game.scenario = r.scenario;
+  Game.visualStart = r.visualStart;
+  Game.hiddenStart = r.hiddenStart;
+  Game.hiddenRate = r.hiddenRate;
+  Game.speedProfile = r.profile;
+  Game.visualRemaining = r.visualStart;
+  Game.hiddenRemaining = r.hiddenStart;
+  Game.isDecoy = r.scenario === 'B';
+  Game.currentSpeed = speedAt(Game.visualStart);
+
+  Game.target.material = Game.isDecoy ? Game.targetDecoyMat : Game.targetRealMat;
+  Game.target.position.set(0, 0, -Game.visualStart);
+  Game.target.rotation.set(0, 0, 0);
+  Game.astronaut.position.set(0, 0, 0);
+  Game.astronaut.rotation.set(0, 0, 0);
+  for (const d of Game.decoys) resetDecoy(d);
+  clearParticles();
+  const glow = $('#danger-glow');
+  if (glow) glow.style.opacity = 0;
+}
+
+/* ===================== GAME STATE & LOGIC ===================== */
 function startRun(bet) {
   Game.bet = bet;
-  // Jarak tabrakan & kecepatan awal DIACAK tiap ronde agar tidak bisa dihafal
-  Game.targetDist = Math.round(randRange(TARGET_DIST_MIN, TARGET_DIST_MAX));
-  Game.speed = randRange(LAUNCH_SPEED_MIN, LAUNCH_SPEED_MAX);
   resetRun();
   Game.state = 'FLYING';
   Game.launchedAt = performance.now();
@@ -715,9 +830,7 @@ function startRun(bet) {
   Audio.launch();
   $('#btn-launch').classList.add('hidden');
   $('#btn-stop').classList.remove('hidden');
-  $('#btn-launch-mobile').classList.add('hidden');
-  $('#btn-stop-mobile').classList.remove('hidden');
-  $('#bet-panel .bet-title').textContent = 'TERBANG! TAHAN & HENTIKAN!';
+  $('#bet-title-label').textContent = 'TERBANG! TAHAN & HENTIKAN!';
 }
 
 function stopAstronaut() {
@@ -727,28 +840,19 @@ function stopAstronaut() {
     Audio.click();
     return;
   }
-  const targetDist = -Game.target.position.z;
-
-  // check side meteor collision
-  let sideHit = false;
-  for (const m of Game.meteors) {
-    if (m.position.z <= 1 && m.position.z > -4.5) {
-      const d = Math.hypot(m.position.x - Game.astronaut.position.x, m.position.y - Game.astronaut.position.y);
-      if (d < SIDE_HIT) { sideHit = true; break; }
-    }
-  }
+  const hr = Game.hiddenRemaining;
+  const vr = Game.visualRemaining;
 
   let outcome;
-  if (sideHit || targetDist <= CRASH_DIST) {
+  if (hr <= CRASH_DIST || vr <= CRASH_DIST) {
     outcome = 'crash';
-  } else if (targetDist <= PERFECT_ZONE) {
+  } else if (hr <= PERFECT_ZONE) {
     outcome = 'perfect';
-  } else if (targetDist > TAKEOFF_DIST) {
-    outcome = 'tooearly';
-  } else {
+  } else if (hr <= SAFE_ZONE) {
     outcome = 'safe';
+  } else {
+    outcome = 'tooearly';
   }
-
   finishRun(outcome);
 }
 
@@ -757,9 +861,8 @@ function finishRun(outcome) {
   Game.flame.visible = false;
   $('#btn-stop').classList.add('hidden');
   $('#btn-launch').classList.remove('hidden');
-  $('#btn-stop-mobile').classList.add('hidden');
-  $('#btn-launch-mobile').classList.remove('hidden');
-  $('#bet-panel .bet-title').textContent = 'TARUHAN TOKEN';
+  $('#bet-title-label').textContent = 'TARUHAN TOKEN';
+  $('#danger-glow').style.opacity = 0;
 
   const user = getUser(currentUser);
   const bet = Game.bet;
@@ -773,7 +876,7 @@ function finishRun(outcome) {
     Audio.safeWin();
     toast(`SAFE STOP! +${fmt(win)} token (2x)`, 'success');
     showResult('SAFE STOP', 'Berhenti dengan aman sebelum meteor! Hadiah 2x lipat', win, 'win');
-    spawnParticles(0x39ff8b, 0x00f0ff, 160, 9, Game.astronaut.position, 2.4);
+    spawnParticles(0x39ff8b, 0x00f0ff, 120, 9, Game.astronaut.position, 2.4);
     Game.shakeAmp = 0.1;
   } else if (outcome === 'perfect') {
     const win = bet * 3;
@@ -785,7 +888,7 @@ function finishRun(outcome) {
     Audio.perfectWin();
     toast(`PERFECT STOP! +${fmt(win)} token (3x)`, 'gold');
     showResult('PERFECT STOP', 'Berhenti di detik terakhir! Bonus 3x lipat!', win, 'perfect');
-    spawnParticles(0xffd24a, 0x39ff8b, 260, 12, Game.astronaut.position, 3);
+    spawnParticles(0xffd24a, 0x39ff8b, 200, 12, Game.astronaut.position, 3);
     Game.shakeAmp = 0.18;
   } else if (outcome === 'tooearly') {
     user.tokens += bet;
@@ -793,8 +896,8 @@ function finishRun(outcome) {
     pushHistory(user, 'TAKEOFF', bet, 0);
     Audio.safeWin();
     toast('TAKE OFF! Terlalu dini berhenti, taruhan dikembalikan', 'info');
-    showResult('TAKE OFF!', 'Terlalu dini berhenti... Tunggu sampai memasuki zona Aman/Perfect', 0, 'takeoff');
-    spawnParticles(0x00f0ff, 0xffffff, 80, 5, Game.astronaut.position, 1.6);
+    showResult('TAKE OFF!', 'Terlalu dini berhenti... Tunggu sampai meteor mendekat', 0, 'takeoff');
+    spawnParticles(0x00f0ff, 0xffffff, 60, 5, Game.astronaut.position, 1.6);
     Game.shakeAmp = 0.05;
   } else {
     user.stats.losses++;
@@ -804,11 +907,11 @@ function finishRun(outcome) {
     setTimeout(() => Audio.lose(), 700);
     toast(`CRASH! -${fmt(bet)} token hangus`, 'error');
     showResult('CRASH!', 'Astronot menabrak meteor... Token taruhan hangus', -bet, 'lose');
-    spawnParticles(0xff3b5c, 0xff7a3c, 240, 12, Game.astronaut.position, 3.5);
+    spawnParticles(0xff3b5c, 0xff7a3c, 180, 12, Game.astronaut.position, 3.5);
     Game.shakeAmp = 0.45;
   }
 
-  saveDB();
+  S.saveUser(user);
   updateTokenUI();
   updateLeaderboards();
   setTimeout(() => {
@@ -836,82 +939,75 @@ function showResult(title, sub, amount, cls) {
   showResult._t = setTimeout(() => $('#result-banner').classList.add('hidden'), 5000);
 }
 
-function updateHUD(dist) {
-  const fill = $('#danger-fill');
-  const pct = clamp((1 - dist / Game.targetDist) * 100, 0, 100);
-  fill.style.width = pct + '%';
-  $('#hud-dist-value').textContent = fmt(Math.max(0, Math.round(dist))) + ' m';
-  const zone = $('#zone-label');
-  if (dist <= CRASH_DIST) {
-    zone.className = 'zone-tag zone-danger';
-    zone.textContent = 'BAHAYA!';
-  } else if (dist <= PERFECT_ZONE) {
-    zone.className = 'zone-tag zone-perfect';
-    zone.textContent = 'PERFECT ZONE';
-  } else if (dist <= TAKEOFF_DIST) {
-    zone.className = 'zone-tag zone-safe';
-    zone.textContent = 'AMAN';
-  } else {
-    zone.className = 'zone-tag zone-idle';
-    zone.textContent = 'BOOST';
-  }
-  const mult = dist <= PERFECT_ZONE ? 3 : (dist <= TAKEOFF_DIST ? 2 : 1);
-  $('#mult-label').textContent = mult + '.0x';
-  $('#potential-win').textContent = 'Potensi menang: ' + fmt(Game.bet * mult) + ' token';
+/* HUD hanya menampilkan multiplier & potensi menang — TANPA JARAK */
+function updateHUDVisual() {
+  const frac = Game.hiddenStart > 0 ? clamp(Game.hiddenRemaining / Game.hiddenStart, 0, 1) : 0;
+  const danger = clamp((1 - frac) * 1.5, 0, 1);
+  const glow = $('#danger-glow');
+  if (glow) glow.style.opacity = (danger * danger * 0.8).toFixed(3);
+
+  let mult = 1;
+  if (Game.hiddenRemaining <= PERFECT_ZONE) mult = 3;
+  else if (Game.hiddenRemaining <= SAFE_ZONE) mult = 2;
+  const mEl = $('#mult-label');
+  mEl.textContent = (mult === 1 ? '1.0x' : mult + '.0x');
+  mEl.style.transform = mult === 3 ? 'scale(1.15)' : '';
+  $('#potential-win').textContent = fmt(Game.bet * mult);
 }
 
-/* ---------- FLIGHT LOOP ---------- */
+/* ===================== FLIGHT LOOP ===================== */
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(Game.clock.getDelta(), 0.05);
   Game.idleT += dt;
-
-  // astronaut idle/anim
   const astro = Game.astronaut;
+
   if (Game.state === 'FLYING') {
-    Game.speed = Math.min(Game.speed + 10 * dt, 130);
+    Game.currentSpeed = speedAt(Game.visualRemaining);
+    Game.visualRemaining -= Game.currentSpeed * dt;
+    Game.hiddenRemaining -= Game.currentSpeed * Game.hiddenRate * dt;
+
+    const target = Game.target;
+    target.position.z = -Game.visualRemaining;
+    target.position.x += (astro.position.x - target.position.x) * 0.06;
+    target.position.y += (astro.position.y - target.position.y) * 0.06;
+    target.rotation.y += dt * 0.6;
+    target.rotation.x += dt * 0.3;
+    if (Game.isDecoy) {
+      target.material.opacity = 0.42 + Math.sin(Game.idleT * 22) * 0.1;
+    }
+
     astro.position.y = Math.sin(Game.idleT * 7) * 0.05;
     astro.rotation.x = -0.12 + Math.sin(Game.idleT * 9) * 0.04;
     astro.rotation.z = clamp(Game.steerX * -0.4, -0.4, 0.4);
     astro.rotation.x += clamp(Game.steerY * -0.3, -0.3, 0.3);
-    // steer position
     astro.position.x = clamp(astro.position.x + Game.steerX * 8 * dt, -7, 7);
     astro.position.y = clamp(astro.position.y + Game.steerY * 8 * dt, -4, 4);
-    // flame flicker
-    Game.flame.scale.set(1 + Math.random() * 0.5, 1 + Game.speed * 0.6, 1 + Math.random() * 0.5);
+    Game.flame.visible = true;
+    Game.flame.scale.set(1 + Math.random() * 0.5, 1 + Game.currentSpeed * 0.5, 1 + Math.random() * 0.5);
 
-    updateMeteors(dt);
-    const tDist = -Game.target.position.z;
-    updateHUD(tDist);
+    updateDecoys(dt);
+    updateHUDVisual();
 
-    // collision checks during flight
-    let crashed = tDist <= CRASH_DIST;
-    if (!crashed) {
-      for (const m of Game.meteors) {
-        if (m.position.z <= 1.5 && m.position.z > -4.5) {
-          const d = Math.hypot(m.position.x - astro.position.x, m.position.y - astro.position.y);
-          if (d < SIDE_HIT) { crashed = true; break; }
-        }
-      }
-    }
-    if (crashed) {
+    if (Game.hiddenRemaining <= 0 || Game.visualRemaining <= 1.5) {
       finishRun('crash');
     }
   } else if (Game.state === 'IDLE') {
     astro.position.y = Math.sin(Game.idleT * 1.4) * 0.12;
     astro.rotation.z = Math.sin(Game.idleT * 0.8) * 0.08;
     astro.rotation.x = 0;
-    updateMeteors(dt);
-    const tDist = -Game.target.position.z;
-    if (tDist < Game.targetDist + 200) {
-      Game.target.position.z = -Game.targetDist - 260;
-    }
+    Game.flame.visible = false;
+    updateDecoys(dt);
+    const target = Game.target;
+    if (-target.position.z < Game.visualStart + 200) target.position.z = -Game.visualStart - 260;
+    target.rotation.y += dt * 0.2;
+    const glow = $('#danger-glow');
+    if (glow) glow.style.opacity = 0;
   }
 
   moveStars(dt);
   updateParticles(dt);
 
-  // camera shake
   if (Game.shakeAmp > 0.001) {
     Game.camera.position.x = (Math.random() - 0.5) * Game.shakeAmp;
     Game.camera.position.y = 2.2 + (Math.random() - 0.5) * Game.shakeAmp;
@@ -940,8 +1036,7 @@ function register(username, password) {
     toast('Password minimal 4 karakter', 'error');
     return false;
   }
-  addUserRecord(u, password, 100, false);
-  saveDB();
+  S.saveUser(mkUser(u, password, 100, false));
   toast('Akun berhasil dibuat!', 'success');
   Audio.requestSent();
   return true;
@@ -957,7 +1052,6 @@ function login(username, password) {
     toast('Password salah!', 'error');
     return false;
   }
-  // Jika dibuka lewat akses admin rahasia, hanya akun admin yang bisa masuk
   if (adminLoginMode && !u.isAdmin) {
     toast('Kredensial admin tidak valid', 'error');
     return false;
@@ -965,6 +1059,8 @@ function login(username, password) {
   currentUser = u.username;
   setSession(u.username);
   adminLoginMode = false;
+  u.lastSeen = Date.now();
+  S.saveUser(u);
   Audio.coins();
   toast(`Selamat datang, ${u.username}!`, 'success');
   return true;
@@ -979,45 +1075,46 @@ function logout() {
     resetRun();
     $('#btn-stop').classList.add('hidden');
     $('#btn-launch').classList.remove('hidden');
-    $('#btn-stop-mobile').classList.add('hidden');
-    $('#btn-launch-mobile').classList.remove('hidden');
-    $('#bet-panel .bet-title').textContent = 'TARUHAN TOKEN';
+    $('#bet-title-label').textContent = 'TARUHAN TOKEN';
     $('#result-banner').classList.add('hidden');
   }
+  closeMenu();
   applyGuestUI();
   toast('Anda telah keluar', 'info');
 }
 
 function applyLoginUI() {
   const u = getUser(currentUser);
-  $('#guest-badge').classList.add('hidden');
-  $('#user-badge').classList.remove('hidden');
-  $('#token-pill').classList.remove('hidden');
-  $('#btn-request-token').classList.toggle('hidden', u.isAdmin);
-  $('#btn-dashboard').classList.toggle('hidden', !u.isAdmin);
-  $('#badge-admin').classList.toggle('hidden', !u.isAdmin);
-  $('#user-name-label').textContent = u.isAdmin ? 'ADMIN' : u.username;
+  $('#welcome-screen').classList.add('hidden');
   $('#hud').classList.remove('hidden');
   $('#bet-panel').classList.remove('hidden');
-  $('#mobile-controls').classList.remove('hidden');
-  $('#btn-launch-mobile').classList.remove('hidden');
-  $('#btn-stop-mobile').classList.add('hidden');
-  $('#welcome-screen').classList.add('hidden');
+  $('#btn-stop').classList.add('hidden');
+  $('#btn-launch').classList.remove('hidden');
+  $('#result-banner').classList.add('hidden');
+  updateMenuUI();
   updateTokenUI();
 }
 
 function applyGuestUI() {
-  $('#guest-badge').classList.remove('hidden');
-  $('#user-badge').classList.add('hidden');
-  $('#token-pill').classList.add('hidden');
-  $('#btn-request-token').classList.add('hidden');
-  $('#btn-dashboard').classList.add('hidden');
-  $('#badge-admin').classList.add('hidden');
+  $('#welcome-screen').classList.remove('hidden');
   $('#hud').classList.add('hidden');
   $('#bet-panel').classList.add('hidden');
-  $('#mobile-controls').classList.add('hidden');
   $('#result-banner').classList.add('hidden');
-  $('#welcome-screen').classList.remove('hidden');
+  $('#danger-glow').style.opacity = 0;
+  updateMenuUI();
+}
+
+function updateMenuUI() {
+  const user = currentUser ? getUser(currentUser) : null;
+  const guest = !user;
+  $('#menu-user').innerHTML = guest
+    ? '<span>Pengunjung</span>'
+    : `<span>${user.isAdmin ? '&#128081; ' : '&#128640; '}${user.username}</span>`;
+  $('#m-auth').classList.toggle('hidden', !guest);
+  $('#m-logout').classList.toggle('hidden', guest);
+  $('#m-request').classList.toggle('hidden', guest || user.isAdmin);
+  $('#m-dashboard').classList.toggle('hidden', guest || !user.isAdmin);
+  $('#token-pill').classList.toggle('hidden', guest);
 }
 
 function updateTokenUI() {
@@ -1027,10 +1124,6 @@ function updateTokenUI() {
 }
 
 /* ===================== AKSES ADMIN RAHASIA ===================== */
-/* Tombol admin TIDAK terlihat di UI umum.
-   Akses admin dibuka lewat:
-     1) Menekan logo ASTRO BLAST 3 kali berturut-turut (dalam 1.5 detik)
-     2) Mengetik kombinasi rahasia "MENUS" (KeyM→KeyE→KeyN→KeyU→KeyS) */
 const ADMIN_SEQ = ['KeyM', 'KeyE', 'KeyN', 'KeyU', 'KeyS'];
 let adminSeqIdx = 0;
 let adminTapCount = 0;
@@ -1039,18 +1132,27 @@ let adminTapTimer = null;
 function openAuthModal(admin) {
   adminLoginMode = !!admin;
   const title = $('#auth-modal-title');
-  title.textContent = admin ? '🔒 AKSES ADMIN' : '🚀 ASTRO BLAST';
+  title.textContent = admin ? '&#128274; AKSES ADMIN' : '&#128640; ASTRO BLAST';
   title.classList.toggle('admin-mode', admin);
   $('#tab-register').classList.toggle('hidden', admin);
   switchAuthTab('login');
   openModal('auth-modal');
+  closeMenu();
   if (admin) toast('Mode admin terbuka', 'info');
+}
+
+/* ===================== MENU HAMBURGER ===================== */
+function toggleMenu() {
+  $('#menu-dropdown').classList.toggle('hidden');
+}
+function closeMenu() {
+  $('#menu-dropdown').classList.add('hidden');
 }
 
 /* ===================== TOKEN REQUEST (PLAYER) ===================== */
 function renderPlayerRequests() {
   const list = $('#request-list');
-  const mine = tokenRequestsData
+  const mine = S.requests
     .filter((r) => r.username === currentUser)
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   if (!mine.length) {
@@ -1087,9 +1189,7 @@ function submitRequest() {
     toast('Masukkan jumlah token valid', 'error');
     return;
   }
-  // Simpan ke tokenRequestsData global (langsung terlihat oleh Admin)
-  tokenRequestsData.push({ id: uid(), username: currentUser, amount, status: 'pending', date: nowStr() });
-  saveDB();
+  S.pushRequest({ id: uid(), username: currentUser, amount, status: 'pending', date: nowStr() });
   Audio.requestSent();
   toast('Request token dikirim ke admin!', 'success');
   $('#request-amount').value = '';
@@ -1099,9 +1199,6 @@ function submitRequest() {
 /* ===================== ADMIN DASHBOARD ===================== */
 function renderAdminDashboard() {
   if (currentUser && !getUser(currentUser).isAdmin) return;
-  // Ambil data terbaru langsung dari localStorage agar user/request baru
-  // yang didaftarkan dari halaman lain langsung tercatat (real-time)
-  loadFresh();
   renderStats();
   renderAdminUsers();
   renderAdminRequests();
@@ -1112,7 +1209,7 @@ function renderAdminDashboard() {
 }
 
 function updateAdminRequestBadge() {
-  const pending = tokenRequestsData.filter((r) => r.status === 'pending').length;
+  const pending = S.requests.filter((r) => r.status === 'pending').length;
   const badge = $('#req-badge');
   if (badge) {
     badge.textContent = pending > 99 ? '99+' : pending;
@@ -1125,21 +1222,23 @@ function updateAdminRequestBadge() {
 }
 
 function allUsersArr() {
-  return Object.values(db.users).sort((a, b) => b.tokens - a.tokens);
+  return Object.values(S.users).sort((a, b) => b.tokens - a.tokens);
 }
 
 function renderStats() {
-  const users = Object.values(db.users);
+  const users = Object.values(S.users);
   const totalTokens = users.reduce((s, u) => s + u.tokens, 0);
-  const pending = tokenRequestsData.filter((r) => r.status === 'pending').length;
+  const pending = S.requests.filter((r) => r.status === 'pending').length;
   const totalGames = users.reduce((s, u) => s + u.stats.gamesPlayed, 0);
+  const online = users.filter(isOnline).length;
   $('#stat-cards').innerHTML = `
     <div class="stat-card"><div class="num">${users.length}</div><div class="lbl">TOTAL USER</div></div>
+    <div class="stat-card"><div class="num">${online}</div><div class="lbl">ONLINE</div></div>
     <div class="stat-card"><div class="num">${fmt(totalTokens)}</div><div class="lbl">TOTAL TOKEN</div></div>
     <div class="stat-card"><div class="num">${pending}</div><div class="lbl">REQUEST PENDING</div></div>
     <div class="stat-card"><div class="num">${totalGames}</div><div class="lbl">TOTAL GAME</div></div>
   `;
-  const pendReqs = tokenRequestsData.filter((r) => r.status === 'pending');
+  const pendReqs = S.requests.filter((r) => r.status === 'pending');
   $('#overview-requests').innerHTML = `
     <h3>&#128176; PERMINTAAN TOKEN MASUK (MENUNGGU)</h3>
     ${pendReqs.length
@@ -1150,10 +1249,13 @@ function renderStats() {
 }
 
 function renderAdminUsers() {
-  const users = Object.values(db.users);
-  $('#users-table-body').innerHTML = users.map((u) => `
+  const users = Object.values(S.users);
+  $('#users-table-body').innerHTML = users.map((u) => {
+    const on = isOnline(u);
+    return `
     <tr>
       <td><div class="user-cell"><span class="user-avatar">${u.username[0].toUpperCase()}</span><span>${u.username}</span></div></td>
+      <td><span class="status-dot ${on ? 'on' : 'off'}"></span><span class="status-label ${on ? 'on' : 'off'}">${on ? 'ONLINE' : 'OFFLINE'}</span></td>
       <td>${u.isAdmin ? '<span class="badge-admin">ADMIN</span>' : 'User'}</td>
       <td style="color:var(--neon-gold);font-weight:700">${fmt(u.tokens)}</td>
       <td style="color:var(--neon-green)">${u.stats.wins}</td>
@@ -1168,11 +1270,12 @@ function renderAdminUsers() {
           <button class="tbl-btn red" data-del="${u.username}">Hapus</button>
         `}
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 
 function renderAdminRequests() {
-  const rows = [...tokenRequestsData].sort((a, b) => {
+  const rows = [...S.requests].sort((a, b) => {
     const o = { pending: 0, approved: 1, rejected: 2 };
     return (o[a.status] || 2) - (o[b.status] || 2) || (b.date || '').localeCompare(a.date || '');
   });
@@ -1199,8 +1302,8 @@ function renderAdminLeaderboard() {
 
 function renderAdminHistory() {
   const all = [];
-  Object.values(db.users).forEach((u) => {
-    u.history.forEach((h) => all.push({ user: u.username, h }));
+  Object.values(S.users).forEach((u) => {
+    (u.history || []).forEach((h) => all.push({ user: u.username, h }));
   });
   all.sort((a, b) => b.h.date.localeCompare(a.h.date));
   $('#admin-history-body').innerHTML = all.length
@@ -1216,12 +1319,12 @@ function renderAdminHistory() {
 }
 
 function renderGiveSelect() {
-  const opts = Object.values(db.users).map((u) => `<option value="${u.username}">${u.username}</option>`).join('');
+  const opts = Object.values(S.users).map((u) => `<option value="${u.username}">${u.username}</option>`).join('');
   $('#give-user').innerHTML = opts;
 }
 
 function buildLeaderboardHTML() {
-  const users = Object.values(db.users).sort((a, b) => {
+  const users = Object.values(S.users).sort((a, b) => {
     if (b.tokens !== a.tokens) return b.tokens - a.tokens;
     return b.stats.wins - a.stats.wins;
   });
@@ -1243,16 +1346,20 @@ function updateLeaderboards() {
     renderAdminLeaderboard();
     renderAdminHistory();
   }
+  if (!$('#leaderboard-modal').classList.contains('hidden')) {
+    renderPublicLeaderboard();
+  }
 }
 
 /* ---------- ADMIN ACTIONS ---------- */
 function approveRequest(userName, reqId) {
-  const req = tokenRequestsData.find((r) => r.id === reqId);
+  const req = S.requests.find((r) => r.id === reqId);
   if (!req || req.status !== 'pending') return;
   req.status = 'approved';
   const u = getUser(userName);
   if (u) u.tokens += req.amount;
-  saveDB();
+  S.updateRequest(reqId, { status: 'approved' });
+  if (u) S.saveUser(u);
   Audio.coins();
   toast(`Request ${fmt(req.amount)} token untuk ${userName} disetujui!`, 'success');
   renderAdminDashboard();
@@ -1260,10 +1367,9 @@ function approveRequest(userName, reqId) {
 }
 
 function rejectRequest(userName, reqId) {
-  const req = tokenRequestsData.find((r) => r.id === reqId);
+  const req = S.requests.find((r) => r.id === reqId);
   if (!req || req.status !== 'pending') return;
-  req.status = 'rejected';
-  saveDB();
+  S.updateRequest(reqId, { status: 'rejected' });
   toast(`Request ${userName} ditolak`, 'error');
   renderAdminDashboard();
 }
@@ -1276,7 +1382,7 @@ function giveTokens(userName, amount) {
     return;
   }
   u.tokens += amount;
-  saveDB();
+  S.saveUser(u);
   Audio.coins();
   toast(`+${fmt(amount)} token dikirim ke ${userName}!`, 'success');
   renderAdminDashboard();
@@ -1290,17 +1396,17 @@ function resetUser(userName) {
   u.tokens = 0;
   u.stats = { wins: 0, losses: 0, perfects: 0, gamesPlayed: 0 };
   u.history = [];
-  saveDB();
+  S.saveUser(u);
   toast(`User ${userName} di-reset`, 'info');
   renderAdminDashboard();
 }
 
 function deleteUser(userName) {
   if (!confirm(`Hapus akun "${userName}"? Tindakan ini tidak bisa dibatalkan.`)) return;
-  delete db.users[userName];
-  saveDB();
+  S.removeUser(userName);
   toast(`Akun ${userName} dihapus`, 'error');
   renderAdminDashboard();
+  if (currentUser === userName) logout();
 }
 
 function createUserByAdmin(username, password, tokens) {
@@ -1318,8 +1424,7 @@ function createUserByAdmin(username, password, tokens) {
     return;
   }
   const tk = Math.max(0, parseInt(tokens, 10) || 0);
-  addUserRecord(u, password, tk, false);
-  saveDB();
+  S.saveUser(mkUser(u, password, tk, false));
   Audio.coins();
   toast(`Akun "${u}" dibuat dengan ${fmt(tk)} token!`, 'success');
   closeModal('adduser-modal');
@@ -1328,10 +1433,10 @@ function createUserByAdmin(username, password, tokens) {
 
 function resetAllData() {
   if (!confirm('HAPUS SEMUA DATA? Seluruh akun user, token, dan riwayat akan terhapus permanen. Admin dibuat ulang.')) return;
-  localStorage.removeItem(USERS_KEY);
-  localStorage.removeItem(REQUESTS_KEY);
-  localStorage.removeItem(STORAGE_KEY);
-  seedDB();
+  S.clearAll();
+  S.ensureAdmin();
+  S.saveUser(S.users[ADMIN_USER]);
+  S.persistLocal();
   if (currentUser && !getUser(currentUser)) {
     logout();
   } else {
@@ -1341,8 +1446,99 @@ function resetAllData() {
   toast('Semua data di-reset', 'info');
 }
 
+/* ===================== REAL-TIME SYNC (Firebase) ===================== */
+function onDataSync() {
+  if (currentUser) updateTokenUI();
+  if ($('#admin-modal') && !$('#admin-modal').classList.contains('hidden')) renderAdminDashboard();
+  if (!$('#leaderboard-modal').classList.contains('hidden')) renderPublicLeaderboard();
+  if (!$('#request-modal').classList.contains('hidden')) renderPlayerRequests();
+}
+
+function heartbeat() {
+  if (!currentUser) return;
+  const u = getUser(currentUser);
+  if (!u) return;
+  u.lastSeen = Date.now();
+  S.persistLocal();
+  if (S.fbEnabled && S.root) S.root.ref('users/' + currentUser + '/lastSeen').set(u.lastSeen);
+}
+
+function startLiveSync() {
+  setInterval(heartbeat, 20000);
+  if (!S.fbEnabled) {
+    // Mode lokal: sinkron antar-tab lewat polling localStorage
+    setInterval(() => {
+      try {
+        const rawU = localStorage.getItem(USERS_KEY);
+        if (rawU) S.users = JSON.parse(rawU);
+        const rawR = localStorage.getItem(REQUESTS_KEY);
+        if (rawR) S.requests = JSON.parse(rawR);
+        onDataSync();
+      } catch (e) { /* korup */ }
+    }, 2000);
+  }
+}
+
 /* ===================== UI BINDINGS ===================== */
+function switchAuthTab(tab) {
+  $('#tab-login').classList.toggle('active', tab === 'login');
+  $('#tab-register').classList.toggle('active', tab === 'register');
+  $('#form-login').classList.toggle('hidden', tab !== 'login');
+  $('#form-register').classList.toggle('hidden', tab !== 'register');
+}
+
 function bindUI() {
+  // Menu hamburger
+  $('#btn-menu').addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleMenu();
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.menu-wrap')) closeMenu();
+  });
+
+  $('#m-leaderboard').addEventListener('click', () => {
+    closeMenu();
+    renderPublicLeaderboard();
+    openModal('leaderboard-modal');
+  });
+  $('#m-history').addEventListener('click', () => {
+    closeMenu();
+    if (!currentUser) {
+      toast('Silakan login dahulu!', 'error');
+      openAuthModal(false);
+      return;
+    }
+    renderPlayerHistory();
+    openModal('history-modal');
+  });
+  $('#m-request').addEventListener('click', () => {
+    closeMenu();
+    renderPlayerRequests();
+    openModal('request-modal');
+  });
+  $('#m-dashboard').addEventListener('click', () => {
+    closeMenu();
+    renderAdminDashboard();
+    openModal('admin-modal');
+  });
+  $('#m-auth').addEventListener('click', () => {
+    closeMenu();
+    openAuthModal(false);
+  });
+  $('#m-logout').addEventListener('click', logout);
+
+  // Logo: ketuk 3x berturut-turut untuk akses admin
+  $('#nav-logo').addEventListener('click', () => {
+    adminTapCount++;
+    if (adminTapTimer) clearTimeout(adminTapTimer);
+    adminTapTimer = setTimeout(() => { adminTapCount = 0; }, 1500);
+    if (adminTapCount >= 3) {
+      adminTapCount = 0;
+      openAuthModal(true);
+    }
+  });
+
   // Auth modal tabs
   $('#tab-login').addEventListener('click', () => switchAuthTab('login'));
   $('#tab-register').addEventListener('click', () => switchAuthTab('register'));
@@ -1374,41 +1570,12 @@ function bindUI() {
     }
   });
 
-  $('#btn-login').addEventListener('click', () => openAuthModal(false));
   $('#btn-start').addEventListener('click', () => openAuthModal(false));
-
-  // Akses admin rahasia: tekan logo 3x berturut-turut
-  $('#nav-logo').addEventListener('click', () => {
-    adminTapCount++;
-    if (adminTapTimer) clearTimeout(adminTapTimer);
-    adminTapTimer = setTimeout(() => { adminTapCount = 0; }, 1500);
-    if (adminTapCount >= 3) {
-      adminTapCount = 0;
-      openAuthModal(true);
-    }
-  });
-
-  $('#btn-logout').addEventListener('click', logout);
-  $('#btn-dashboard').addEventListener('click', () => {
-    renderAdminDashboard();
-    openModal('admin-modal');
-  });
-  $('#btn-leaderboard').addEventListener('click', () => {
-    renderPublicLeaderboard();
-    openModal('leaderboard-modal');
-  });
-  $('#btn-history').addEventListener('click', () => {
-    if (!currentUser) {
-      toast('Silakan login dahulu!', 'error');
-      openModal('auth-modal');
-      return;
-    }
-    renderPlayerHistory();
-    openModal('history-modal');
-  });
-  $('#btn-request-token').addEventListener('click', () => {
-    renderPlayerRequests();
-    openModal('request-modal');
+  $('#btn-sound').addEventListener('click', () => {
+    Audio.muted = !Audio.muted;
+    $('#btn-sound').textContent = Audio.muted ? '\u{1F507}' : '\u{1F50A}';
+    toast(Audio.muted ? 'Suara dimatikan' : 'Suara dinyalakan', 'info');
+    if (!Audio.muted) Audio.click();
   });
 
   $('#btn-submit-request').addEventListener('click', submitRequest);
@@ -1426,14 +1593,6 @@ function bindUI() {
     });
   });
 
-  // Sound toggle
-  $('#btn-sound').addEventListener('click', () => {
-    Audio.muted = !Audio.muted;
-    $('#btn-sound').style.opacity = Audio.muted ? 0.4 : 1;
-    toast(Audio.muted ? 'Suara dimatikan' : 'Suara dinyalakan', 'info');
-    if (!Audio.muted) Audio.click();
-  });
-
   // Bet chips
   $$('.chip[data-add]').forEach((c) => {
     c.addEventListener('click', () => {
@@ -1449,11 +1608,11 @@ function bindUI() {
     }
   });
 
-  // Launch / Stop
+  // Launch
   $('#btn-launch').addEventListener('click', () => {
     if (!currentUser) {
       toast('Silakan login dahulu!', 'error');
-      openModal('auth-modal');
+      openAuthModal(false);
       return;
     }
     const u = getUser(currentUser);
@@ -1467,26 +1626,14 @@ function bindUI() {
       return;
     }
     u.tokens -= bet;
-    saveDB();
+    S.saveUser(u);
     updateTokenUI();
     startRun(bet);
   });
 
+  // Stop (desktop & mobile via tombol besar)
   $('#btn-stop').addEventListener('click', () => {
     stopAstronaut();
-  });
-
-  // ===== Mobile thumb-zone controls (meluncur / berhenti) =====
-  $('#btn-launch-mobile').addEventListener('click', () => {
-    if (!$('#btn-launch-mobile').classList.contains('hidden')) $('#btn-launch').click();
-  });
-  const triggerStop = (e) => {
-    if (e.cancelable) e.preventDefault();
-    if ($('#btn-stop-mobile').classList.contains('hidden')) return;
-    $('#btn-stop').click();
-  };
-  ['pointerdown', 'touchstart', 'mousedown'].forEach((ev) => {
-    $('#btn-stop-mobile').addEventListener(ev, triggerStop);
   });
 
   $('#btn-replay').addEventListener('click', () => {
@@ -1499,7 +1646,6 @@ function bindUI() {
   window.addEventListener('keydown', (e) => {
     Audio.init(); Audio.resume();
 
-    // Kombinasi rahasia admin: ketik "MENUS" berurutan (saat tidak terbang)
     if (Game.state !== 'FLYING') {
       let matched = false;
       if (e.code === ADMIN_SEQ[adminSeqIdx]) {
@@ -1529,7 +1675,6 @@ function bindUI() {
     if (e.code === 'KeyA' || e.code === 'KeyD' || e.code === 'ArrowLeft' || e.code === 'ArrowRight') Game.steerX = 0;
   });
 
-  // Audio init on any gesture
   const unlockAudio = () => { Audio.init(); Audio.resume(); };
   ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => window.addEventListener(ev, unlockAudio, { once: true }));
 
@@ -1544,7 +1689,7 @@ function bindUI() {
   });
   $('#btn-admin-close').addEventListener('click', () => closeModal('admin-modal'));
 
-  // Admin: users table actions (event delegation)
+  // Admin: users table actions
   $('#users-table-body').addEventListener('click', (e) => {
     const giveBtn = e.target.closest('[data-give]');
     if (giveBtn) {
@@ -1572,7 +1717,7 @@ function bindUI() {
     $('#au-user').value = ''; $('#au-pass').value = ''; $('#au-tokens').value = '100';
   });
 
-  // Give tokens (tools)
+  // Give tokens
   $('#btn-give-tokens').addEventListener('click', () => {
     const user = $('#give-user').value;
     const amt = parseInt($('#give-amount').value, 10);
@@ -1582,42 +1727,6 @@ function bindUI() {
 
   // Reset all
   $('#btn-reset-all').addEventListener('click', resetAllData);
-}
-
-/* ---------- REAL-TIME ADMIN SYNC ---------- */
-let adminLiveTimer = null;
-function startAdminLiveRefresh() {
-  if (adminLiveTimer) return;
-  // Sinkron antar-tab (user baru daftar di tab lain langsung muncul)
-  window.addEventListener('storage', onStorageSync);
-  // Refresh berkala selama dashboard admin terbuka
-  adminLiveTimer = setInterval(() => {
-    if (!currentUser) return;
-    const u = getUser(currentUser);
-    if (!u || !u.isAdmin) return;
-    if (!$('#admin-modal').classList.contains('hidden')) {
-      renderAdminDashboard();
-      updateTokenUI();
-    }
-  }, 2500);
-}
-
-function onStorageSync(e) {
-  // Terima perubahan data dari tab lain tanpa harus reload halaman
-  if (e.key === USERS_KEY || e.key === REQUESTS_KEY) {
-    loadFresh();
-    if (currentUser) updateTokenUI();
-    if ($('#admin-modal') && !$('#admin-modal').classList.contains('hidden')) {
-      renderAdminDashboard();
-    }
-  }
-}
-
-function switchAuthTab(tab) {
-  $('#tab-login').classList.toggle('active', tab === 'login');
-  $('#tab-register').classList.toggle('active', tab === 'register');
-  $('#form-login').classList.toggle('hidden', tab !== 'login');
-  $('#form-register').classList.toggle('hidden', tab !== 'register');
 }
 
 /* ===================== PUBLIC LEADERBOARD & HISTORY ===================== */
@@ -1645,24 +1754,22 @@ function renderPlayerHistory() {
 
 /* ===================== INIT ===================== */
 function boot() {
-  loadDB();
+  S.init();
   bindUI();
   initThree();
-  startAdminLiveRefresh();
-
-  const isAdmin = currentUser && getUser(currentUser) && getUser(currentUser).isAdmin;
-  if (!isAdmin) {
-    $('#btn-dashboard').classList.add('hidden');
-  }
+  startLiveSync();
 
   if (restoreSession()) {
     applyLoginUI();
   } else {
     applyGuestUI();
   }
+  updateMenuUI();
 
-  if (!Audio.muted) {
-    $('#btn-sound').style.opacity = 1;
+  if (S.fbEnabled) {
+    toast('Terhubung ke Firebase cloud — sinkron antar HP aktif', 'success');
+  } else {
+    toast('Mode lokal — isi Firebase config untuk sinkron antar HP', 'info');
   }
 }
 

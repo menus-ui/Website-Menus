@@ -2,7 +2,8 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#05060f">
 <title>ASTRO BLAST :: Space Token Game</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,17 +18,16 @@
   <!-- OVERLAY GRID -->
   <div class="scanlines"></div>
 
-  <!-- ============ NAVBAR ============ -->
-  <header id="navbar">
-    <div class="nav-logo" id="nav-logo">
-      <span class="logo-icon">&#128640;</span>
-      <span class="logo-text">ASTRO<span class="accent">BLAST</span></span>
-    </div>
+  <!-- Vignette bahaya (feedback visual tanpa angka jarak) -->
+  <div id="danger-glow"></div>
 
-    <div class="nav-center">
-      <button class="nav-btn" id="btn-leaderboard">PAPAN PERINGKAT</button>
-      <button class="nav-btn hidden" id="btn-request-token">&#128142; REQUEST TOKEN</button>
-      <button class="nav-btn" id="btn-history">RIWAYAT</button>
+  <!-- ============ NAVBAR (ringkas, menu hamburger) ============ -->
+  <header id="navbar">
+    <div class="nav-left">
+      <div class="nav-logo" id="nav-logo">
+        <span class="logo-icon">&#128640;</span>
+        <span class="logo-text">ASTRO<span class="accent">BLAST</span></span>
+      </div>
     </div>
 
     <div class="nav-right">
@@ -35,68 +35,58 @@
         <span class="token-ico">&#128142;</span>
         <span id="token-balance">0</span>
       </div>
-      <div id="user-badge" class="hidden">
-        <span id="user-name-label"></span>
-        <span class="badge-admin hidden" id="badge-admin">ADMIN</span>
-        <button class="nav-btn small" id="btn-dashboard" title="Dashboard Admin">DASHBOARD</button>
-        <button class="nav-btn small" id="btn-logout">KELUAR</button>
-      </div>
-      <div id="guest-badge">
-        <button class="nav-btn accent" id="btn-login">MASUK</button>
-      </div>
       <button class="icon-btn" id="btn-sound" title="Suara ON/OFF">&#128266;</button>
+      <div class="menu-wrap">
+        <button class="icon-btn menu-hamburger" id="btn-menu" title="Menu">&#9776;</button>
+        <div class="menu-dropdown hidden" id="menu-dropdown">
+          <div id="menu-user" class="menu-user">Pengunjung</div>
+          <button class="menu-item" id="m-leaderboard">&#127942; Papan Peringkat</button>
+          <button class="menu-item" id="m-history">&#128220; Riwayat</button>
+          <button class="menu-item hidden" id="m-request">&#128142; Request Token</button>
+          <button class="menu-item hidden" id="m-dashboard">&#128295; Dashboard Admin</button>
+          <div class="menu-divider"></div>
+          <button class="menu-item accent" id="m-auth">&#128273; Masuk</button>
+          <button class="menu-item red hidden" id="m-logout">&#9211; Keluar</button>
+        </div>
+      </div>
     </div>
   </header>
 
   <!-- ============ WELCOME SCREEN ============ -->
   <div id="welcome-screen">
     <div class="big-title">ASTRO<span class="accent">BLAST</span></div>
-    <div class="big-sub">TARUHAN TOKEN • GAME ASTRONOT 3D</div>
+    <div class="big-sub">TARUHAN TOKEN &bull; GAME ASTRONOT 3D</div>
     <button class="big-cta" id="btn-start">&#128640; MULAI BERMAIN</button>
   </div>
 
-  <!-- ============ HUD ============ -->
+  <!-- ============ HUD (tanpa indikator jarak) ============ -->
   <div id="hud" class="hidden">
-    <div id="hud-distance">
-      <span class="hud-label">JARAK KE METEOR</span>
-      <div id="danger-bar"><div id="danger-fill"></div></div>
-      <span id="hud-dist-value">--</span>
+    <div class="hud-pill">
+      <span class="hud-label">MULTIPLIER</span>
+      <span id="mult-label" class="mult">2.0x</span>
     </div>
-    <div id="hud-zone">
-      <span class="hud-label">ZONA</span>
-      <span id="zone-label" class="zone-tag zone-idle">AMAN</span>
-    </div>
-    <div id="hud-multiplier">
-      <span class="hud-label">POTENSI KEMENANGAN</span>
-      <span id="mult-label" class="mult">1.0x</span>
+    <div class="hud-pill">
+      <span class="hud-label">POTENSI MENANG</span>
       <span id="potential-win">0</span>
     </div>
   </div>
 
-  <!-- ============ BET PANEL ============ -->
+  <!-- ============ PANEL TARUHAN BAWAH (bottom-fixed, rapat) ============ -->
   <div id="bet-panel" class="hidden">
     <div class="bet-box">
-      <div class="bet-title">TARUHAN TOKEN</div>
+      <div class="bet-title" id="bet-title-label">TARUHAN TOKEN</div>
       <div class="bet-input-row">
         <button class="chip" data-add="10">+10</button>
         <button class="chip" data-add="50">+50</button>
         <button class="chip" data-add="100">+100</button>
         <button class="chip" data-add="500">+500</button>
-        <input type="number" id="bet-input" min="1" placeholder="Jumlah token" value="10">
         <button class="chip" id="bet-max">MAX</button>
+        <input type="number" id="bet-input" min="1" placeholder="Token" value="10" inputmode="numeric">
       </div>
-      <div class="bet-actions">
-        <button class="btn-play" id="btn-launch">&#128640; LUNCURKAN</button>
-        <button class="btn-stop hidden" id="btn-stop">&#9209; BERHENTI!</button>
-      </div>
-      <div class="bet-hint">Gunakan <b>W A S D / Panah</b> untuk bermanuver, tekan <b>SPASI</b> untuk berhenti</div>
+      <button class="btn-play" id="btn-launch">&#128640; LUNCURKAN</button>
+      <button class="btn-stop hidden" id="btn-stop">&#9209; BERHENTI!</button>
+      <div class="bet-hint">W A S D / panah untuk bermanuver &bull; SPASI untuk berhenti</div>
     </div>
-  </div>
-
-  <!-- ============ MOBILE CONTROL BAR (THUMB ZONE) ============ -->
-  <div id="mobile-controls" class="hidden">
-    <button class="mobile-btn launch" id="btn-launch-mobile">&#128640; LUNCURKAN</button>
-    <button class="mobile-btn stop" id="btn-stop-mobile">&#9209; BERHENTI!</button>
   </div>
 
   <!-- ============ RESULT BANNER ============ -->
@@ -146,7 +136,7 @@
       <div class="modal-title">&#128142; REQUEST TOKEN</div>
       <p class="modal-desc">Ajukan permintaan token ke Admin. Status akan berubah menjadi <b>Disetujui</b> / <b>Ditolak</b> setelah diproses.</p>
       <label>Jumlah Token</label>
-      <input type="number" id="request-amount" min="1" placeholder="Contoh: 500">
+      <input type="number" id="request-amount" min="1" placeholder="Contoh: 500" inputmode="numeric">
       <div class="modal-actions">
         <button class="btn-submit" id="btn-submit-request">AJUKAN</button>
         <button class="btn-ghost" data-close="request-modal">BATAL</button>
@@ -187,7 +177,7 @@
             <table class="admin-table">
               <thead>
                 <tr>
-                  <th>User</th><th>Role</th><th>Token</th><th>Win</th><th>Lose</th><th>Perfect</th><th>Games</th><th>Aksi</th>
+                  <th>User</th><th>Status</th><th>Role</th><th>Token</th><th>Win</th><th>Lose</th><th>Perfect</th><th>Games</th><th>Aksi</th>
                 </tr>
               </thead>
               <tbody id="users-table-body"></tbody>
@@ -233,7 +223,7 @@
             <div class="tool-card">
               <h3>Kirim Token Langsung</h3>
               <select id="give-user"></select>
-              <input type="number" id="give-amount" min="1" placeholder="Jumlah token">
+              <input type="number" id="give-amount" min="1" placeholder="Jumlah token" inputmode="numeric">
               <button class="btn-submit" id="btn-give-tokens">KIRIM TOKEN</button>
             </div>
             <div class="tool-card">
@@ -279,7 +269,7 @@
       <label>Password</label>
       <input type="text" id="au-pass" required>
       <label>Token Awal</label>
-      <input type="number" id="au-tokens" min="0" value="100" required>
+      <input type="number" id="au-tokens" min="0" value="100" inputmode="numeric" required>
       <div class="modal-actions">
         <button class="btn-submit" id="btn-au-submit">BUAT AKUN</button>
         <button class="btn-ghost" data-close="adduser-modal">BATAL</button>
@@ -287,6 +277,10 @@
     </div>
   </div>
 
+  <!-- Firebase Realtime Database via CDN (compat SDK) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  <!-- Three.js (lightweight, r128) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="script.js"></script>
 </body>

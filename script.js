@@ -78,6 +78,9 @@ function rollCrashPoint() {
 function fmtMult(m) {
   return m.toFixed(1).replace('.', ',');
 }
+function fmtMult2(m) {
+  return m.toFixed(2).replace('.', ',');
+}
 function mkUser(username, password, tokens, isAdmin) {
   return {
     username,
@@ -878,6 +881,7 @@ function startRun(bet) {
   Game.state = 'FLYING';
   Game.launchedAt = performance.now();
   Game.flame.visible = true;
+  setStatusBadge('FLYING');
   Audio.launch();
   $('#btn-launch').classList.add('hidden');
   $('#btn-stop').classList.remove('hidden');
@@ -923,6 +927,7 @@ function finishRun(outcome) {
     pushHistory(user, 'WIN', bet, win);
     Audio.safeWin();
     toast(`SAFE STOP! +${fmt(win)} token (${fmtMult(mult)}x)`, 'success');
+    setStatusBadge('CASHOUT');
     triggerWinCelebration(mult, win);
   } else if (outcome === 'takeoff') {
     user.tokens += bet;
@@ -930,6 +935,7 @@ function finishRun(outcome) {
     pushHistory(user, 'TAKEOFF', bet, 0);
     Audio.safeWin();
     toast('TAKE OFF! Terlalu dini berhenti, taruhan dikembalikan', 'info');
+    setStatusBadge('');
     showResult('TAKE OFF!', 'Terlalu dini berhenti... Tunggu sampai meteor mendekat', 0, 'takeoff');
     spawnParticles(0x00f0ff, 0xffffff, 60, 5, Game.astronaut.position, 1.6);
     Game.shakeAmp = 0.05;
@@ -942,6 +948,7 @@ function finishRun(outcome) {
     toast(`CRASH! -${fmt(bet)} token hangus`, 'error');
     spawnParticles(0xff3b5c, 0xff7a3c, 220, 16, Game.astronaut.position, 4.2);
     Game.shakeAmp = 0.6;
+    setStatusBadge('CRASHED');
     redFlash();
     showCrashModal(mult, bet);
   }
@@ -985,32 +992,37 @@ function floatingText(text) {
   el.classList.add('show');
 }
 
-function countUp(el, target, dur) {
+function countUp(el, target, dur, opts = {}) {
   const start = performance.now();
+  const fmtFn = opts.fmt || ((n) => fmt(Math.round(n)));
   const step = (now) => {
     const t = Math.min(1, (now - start) / dur);
     const eased = 1 - Math.pow(1 - t, 3);
-    el.textContent = fmt(Math.round(target * eased));
+    el.textContent = fmtFn(target * eased);
     if (t < 1) requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
 }
 
 function showVictoryModal(mult, win) {
-  $('#victory-title').innerHTML = '&#128640; PENERBANGAN SUKSES!';
-  $('#victory-sub').textContent = 'WIN! SAFE STOP';
-  $('#victory-mult').textContent = fmtMult(mult) + 'x MULTIPLIER';
-  $('#victory-count').textContent = '0';
+  $('#victory-title').innerHTML = '&#127881; PENERBANGAN SUKSES! <span class="win-tag">(WIN)</span>';
+  $('#victory-sub').textContent = 'PENARIKAN AMAN SEBELUM METEOR';
+  $('#victory-mult').textContent = fmtMult2(mult) + 'x';
+  $('#victory-count').textContent = '+0 TOKEN';
   $('.victory-box').classList.remove('perfect');
   openModal('victory-modal');
-  setTimeout(() => countUp($('#victory-count'), win, 1400), 300);
+  setTimeout(() => {
+    countUp($('#victory-count'), win, 1500, { fmt: (n) => '+' + fmt(Math.round(n)) + ' TOKEN' });
+  }, 300);
 }
 
 function showCrashModal(crashMult, bet) {
-  $('#crash-mult-value').textContent = fmtMult(crashMult) + 'x';
-  $('#crash-count').textContent = '0';
+  $('#crash-mult-value').textContent = fmtMult2(crashMult) + 'x';
+  $('#crash-count').textContent = '-0 TOKEN';
   openModal('crash-modal');
-  setTimeout(() => countUp($('#crash-count'), bet, 1200), 300);
+  setTimeout(() => {
+    countUp($('#crash-count'), bet, 1300, { fmt: (n) => '-' + fmt(Math.round(n)) + ' TOKEN' });
+  }, 300);
 }
 
 function redFlash() {
@@ -1020,12 +1032,51 @@ function redFlash() {
   el.classList.add('on');
 }
 
+/* ===================== STATUS BADGE (HUD real-time di atas astronot) ===================== */
+const BADGE_STATES = {
+  FLYING:  { cls: 'flying',  text: '\u{1F680} FLYING...' },
+  CASHOUT: { cls: 'cashout', text: '\u2705 CASHOUT SAFE!' },
+  CRASHED: { cls: 'crashed', text: '\u{1F4A5} CRASHED!' }
+};
+let badgeState = '';
+
+function setStatusBadge(key) {
+  if (badgeState === key) return;
+  badgeState = key;
+  const el = $('#status-badge');
+  if (!el) return;
+  if (!key) {
+    el.classList.add('hidden');
+    return;
+  }
+  const s = BADGE_STATES[key];
+  el.classList.remove('hidden');
+  el.className = 'status-badge ' + s.cls;
+  el.textContent = s.text;
+}
+
+function updateBadgePosition() {
+  if (!badgeState) return;
+  const el = $('#status-badge');
+  if (!el || el.classList.contains('hidden')) return;
+  const v = new THREE.Vector3(0, 1.9, 0).add(Game.astronaut.position);
+  v.project(Game.camera);
+  if (v.z > 1) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = '';
+  el.style.left = ((v.x * 0.5 + 0.5) * window.innerWidth) + 'px';
+  el.style.top = ((-v.y * 0.5 + 0.5) * window.innerHeight) + 'px';
+}
+
 /* Reset state secara bersih — dipakai tombol "MAIN LAGI" agar tidak macet di ronde berikutnya */
 function resetGameState() {
   Game.state = 'IDLE';
   Game.shakeAmp = 0;
   resetRun();
   clearParticles();
+  setStatusBadge('');
   $('#result-banner').classList.add('hidden');
   closeModal('victory-modal');
   closeModal('crash-modal');
@@ -1093,6 +1144,7 @@ function animate() {
 
     updateDecoys(dt);
     updateHUDVisual();
+    setStatusBadge('FLYING');
 
     if (Game.hiddenRemaining <= 0 || Game.visualRemaining <= 1.5) {
       finishRun('crash');
@@ -1122,6 +1174,8 @@ function animate() {
     Game.camera.position.y = 2.2;
   }
   Game.camera.lookAt(astro.position.x * 0.4, 0.6 + astro.position.y * 0.3, -6);
+
+  updateBadgePosition();
 
   Game.renderer.render(Game.scene, Game.camera);
 }
@@ -1206,6 +1260,7 @@ function applyGuestUI() {
   $('#bet-panel').classList.add('hidden');
   $('#result-banner').classList.add('hidden');
   $('#danger-glow').style.opacity = 0;
+  setStatusBadge('');
   updateMenuUI();
 }
 

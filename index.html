@@ -1,380 +1,288 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Personal Portfolio - Philip Gilbert. Web designer & developer.">
-  <title>Personal | Portfolio</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="css/style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ASTRO BLAST :: Space Token Game</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- ======= Header / Navigation ======= -->
-  <header class="header" id="header">
-    <nav class="navbar container">
-      <a href="#home" class="logo">
-        <span class="logo-icon" aria-hidden="true"><i class="fa-solid fa-shapes"></i></span>
-        <span class="logo-text">Personal</span>
-      </a>
+  <!-- 3D GAME CANVAS -->
+  <div id="game3d"></div>
 
-      <ul class="nav-menu" id="nav-menu">
-        <li><a href="#home" class="nav-link active">Home</a></li>
-        <li><a href="#about" class="nav-link">About</a></li>
-        <li><a href="#service" class="nav-link">Service</a></li>
-        <li><a href="#portfolio" class="nav-link">Portfolio</a></li>
-        <li><a href="#contact" class="nav-link">Contact</a></li>
-      </ul>
+  <!-- OVERLAY GRID -->
+  <div class="scanlines"></div>
 
-      <div class="nav-actions">
-        <button class="search-btn" aria-label="Search"><i class="fa-solid fa-magnifying-glass"></i></button>
-        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation"><i class="fa-solid fa-bars"></i></button>
+  <!-- ============ NAVBAR ============ -->
+  <header id="navbar">
+    <div class="nav-logo">
+      <span class="logo-icon">&#128640;</span>
+      <span class="logo-text">ASTRO<span class="accent">BLAST</span></span>
+    </div>
+
+    <div class="nav-center">
+      <button class="nav-btn" id="btn-leaderboard">PAPAN PERINGKAT</button>
+      <button class="nav-btn hidden" id="btn-request-token">&#128142; REQUEST TOKEN</button>
+      <button class="nav-btn" id="btn-history">RIWAYAT</button>
+    </div>
+
+    <div class="nav-right">
+      <div id="token-pill" class="hidden">
+        <span class="token-ico">&#128142;</span>
+        <span id="token-balance">0</span>
       </div>
-    </nav>
+      <div id="user-badge" class="hidden">
+        <span id="user-name-label"></span>
+        <span class="badge-admin hidden" id="badge-admin">ADMIN</span>
+        <button class="nav-btn small" id="btn-dashboard" title="Dashboard Admin">DASHBOARD</button>
+        <button class="nav-btn small" id="btn-logout">KELUAR</button>
+      </div>
+      <div id="guest-badge">
+        <button class="nav-btn accent" id="btn-login">MASUK</button>
+      </div>
+      <button class="icon-btn" id="btn-sound" title="Suara ON/OFF">&#128266;</button>
+    </div>
   </header>
 
-  <main>
+  <!-- ============ WELCOME SCREEN ============ -->
+  <div id="welcome-screen">
+    <div class="big-title">ASTRO<span class="accent">BLAST</span></div>
+    <div class="big-sub">TARUHAN TOKEN • GAME ASTRONOT 3D</div>
+    <button class="big-cta" id="btn-start">&#128640; MULAI BERMAIN</button>
+  </div>
 
-    <!-- ======= Hero ======= -->
-    <section id="home" class="hero">
-      <div class="container hero-wrap">
-        <div class="hero-text">
-          <p class="eyebrow">This is me</p>
-          <h1>Philip Gilbert</h1>
-          <p class="hero-desc">
-            You will begin to realise why this exercise is called the Dickens Pattern with reference to the ghost showing Scrooge some different futures.
-          </p>
-          <a href="#about" class="btn btn-primary">Discover Now</a>
-        </div>
+  <!-- ============ HUD ============ -->
+  <div id="hud" class="hidden">
+    <div id="hud-distance">
+      <span class="hud-label">JARAK KE METEOR</span>
+      <div id="danger-bar"><div id="danger-fill"></div></div>
+      <span id="hud-dist-value">--</span>
+    </div>
+    <div id="hud-zone">
+      <span class="hud-label">ZONA</span>
+      <span id="zone-label" class="zone-tag zone-idle">AMAN</span>
+    </div>
+    <div id="hud-multiplier">
+      <span class="hud-label">POTENSI KEMENANGAN</span>
+      <span id="mult-label" class="mult">1.0x</span>
+      <span id="potential-win">0</span>
+    </div>
+  </div>
 
-        <div class="hero-visual">
-          <div class="photo-frame">
-            <img src="https://randomuser.me/api/portraits/men/75.jpg" alt="Portrait of Philip Gilbert" class="photo-img">
-          </div>
-        </div>
+  <!-- ============ BET PANEL ============ -->
+  <div id="bet-panel" class="hidden">
+    <div class="bet-box">
+      <div class="bet-title">TARUHAN TOKEN</div>
+      <div class="bet-input-row">
+        <button class="chip" data-add="10">+10</button>
+        <button class="chip" data-add="50">+50</button>
+        <button class="chip" data-add="100">+100</button>
+        <button class="chip" data-add="500">+500</button>
+        <input type="number" id="bet-input" min="1" placeholder="Jumlah token" value="10">
+        <button class="chip" id="bet-max">MAX</button>
       </div>
-    </section>
-
-    <!-- ======= About ======= -->
-    <section id="about" class="about">
-      <div class="container about-wrap">
-        <div class="about-visual">
-          <div class="about-photo-wrap">
-            <div class="about-circle"></div>
-            <img src="https://randomuser.me/api/portraits/men/76.jpg" alt="Philip Gilbert pointing up" class="about-img">
-          </div>
-        </div>
-
-        <div class="about-text">
-          <p class="eyebrow">About Me</p>
-          <h2>Personal Details</h2>
-          <p class="about-desc">
-            Here, I focus on a range of items and features that we use in life without giving them a second thought, such as Coca Cola. Dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
-          </p>
-          <a href="#portfolio" class="btn btn-primary">View Full Details</a>
-        </div>
+      <div class="bet-actions">
+        <button class="btn-play" id="btn-launch">&#128640; LUNCURKAN</button>
+        <button class="btn-stop hidden" id="btn-stop">&#9209; BERHENTI!</button>
       </div>
-    </section>
+      <div class="bet-hint">Gunakan <b>W A S D / Panah</b> untuk bermanuver, tekan <b>SPASI</b> untuk berhenti</div>
+    </div>
+  </div>
 
-    <!-- ======= Services ======= -->
-    <section id="service" class="services">
-      <div class="container">
-        <div class="section-head">
-          <h2>My Offered Services</h2>
-          <p>At about this time of year, some months after New Year's resolutions have been made and kept, or made and neglected.</p>
-        </div>
+  <!-- ============ RESULT BANNER ============ -->
+  <div id="result-banner" class="hidden">
+    <div id="result-inner">
+      <div id="result-title">SAFE STOP</div>
+      <div id="result-sub">Taruhan dikembalikan 2x lipat</div>
+      <div id="result-amount">+20 TOKEN</div>
+      <button class="btn-play small" id="btn-replay">MAIN LAGI</button>
+    </div>
+  </div>
 
-        <div class="services-grid">
-          <article class="service-card">
-            <div class="service-icon"><i class="fa-solid fa-stopwatch"></i></div>
-            <h3 class="service-title">Web Design</h3>
-            <p>It is not because things are difficult that we do not dare; it is because we do not dare that they are difficult.</p>
-          </article>
-
-          <article class="service-card">
-            <div class="service-icon"><i class="fa-solid fa-desktop"></i></div>
-            <h3 class="service-title">Web Development</h3>
-            <p>If you are an entrepreneur, you know that your success cannot depend on the opinions of others. Like the wind, opinions.</p>
-          </article>
-
-          <article class="service-card">
-            <div class="service-icon"><i class="fa-solid fa-camera"></i></div>
-            <h3 class="service-title">Photography</h3>
-            <p>Do you want to be even more successful? Learn to love learning and growth. The more effort you put into improving your skills.</p>
-          </article>
-
-          <article class="service-card">
-            <div class="service-icon"><i class="fa-solid fa-scissors"></i></div>
-            <h3 class="service-title">Clipping Path</h3>
-            <p>Hypnosis quit working properly and just went to a new place. It was about to feel the new things under the surface.</p>
-          </article>
-
-          <article class="service-card">
-            <div class="service-icon"><i class="fa-solid fa-mobile-screen-button"></i></div>
-            <h3 class="service-title">Apps Interface</h3>
-            <p>Do you sometimes have the feeling that you're running into the empty streets, your way always falling short and being there.</p>
-          </article>
-
-          <article class="service-card">
-            <div class="service-icon"><i class="fa-solid fa-paintbrush"></i></div>
-            <h3 class="service-title">Graphic Design</h3>
-            <p>You've heard the expression, "Just believe it and it will come." No, not just believe it, but believe in it too. Keep on keeping on.</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ======= Stats / Counter Banner ======= -->
-    <section id="stats" class="stats">
-      <div class="container stats-grid">
-        <div class="stat-item">
-          <span class="stat-number" data-count="2536">0</span>
-          <span class="stat-label">Projects Completed</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-number" data-count="6784">0</span>
-          <span class="stat-label">Happy Clients</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-number" data-count="2239">0</span>
-          <span class="stat-label">Cups of Coffee</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-number" data-count="434">0</span>
-          <span class="stat-label">Real Professionals</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- ======= Portfolio ======= -->
-    <section id="portfolio" class="portfolio">
-      <div class="container">
-        <div class="section-head">
-          <h2>Our Latest Featured Projects</h2>
-          <p>Who are in extremely love with eco friendly system.</p>
-        </div>
-
-        <div class="portfolio-grid">
-          <article class="portfolio-card">
-            <a href="#" class="portfolio-thumb">
-              <img src="https://placehold.co/600x500/ffeaa7/2d3436?text=2D+Vinyl" alt="2D Vinyl Design project">
-              <span class="portfolio-overlay"><i class="fa-solid fa-plus"></i></span>
-            </a>
-            <div class="portfolio-info">
-              <h3 class="portfolio-title">2D Vinyl Design</h3>
-              <p class="portfolio-cat">vector</p>
-            </div>
-          </article>
-
-          <article class="portfolio-card">
-            <a href="#" class="portfolio-thumb">
-              <img src="https://placehold.co/600x500/ff9ff3/2d3436?text=Creative+Poster" alt="Creative Poster Design project">
-              <span class="portfolio-overlay"><i class="fa-solid fa-plus"></i></span>
-            </a>
-            <div class="portfolio-info">
-              <h3 class="portfolio-title">Creative Poster Design</h3>
-              <p class="portfolio-cat">Agency</p>
-            </div>
-          </article>
-
-          <article class="portfolio-card">
-            <a href="#" class="portfolio-thumb">
-              <img src="https://placehold.co/600x500/48dbfb/1b2a4a?text=Embossed+Logo" alt="Embossed Logo Design project">
-              <span class="portfolio-overlay"><i class="fa-solid fa-plus"></i></span>
-            </a>
-            <div class="portfolio-info">
-              <h3 class="portfolio-title">Embossed Logo Design</h3>
-              <p class="portfolio-cat">Portal</p>
-            </div>
-          </article>
-
-          <article class="portfolio-card">
-            <a href="#" class="portfolio-thumb">
-              <img src="https://placehold.co/600x500/ff6b6b/ffffff?text=3D+Helmet" alt="3D Helmet Design project">
-              <span class="portfolio-overlay"><i class="fa-solid fa-plus"></i></span>
-            </a>
-            <div class="portfolio-info">
-              <h3 class="portfolio-title">3D Helmet Design</h3>
-              <p class="portfolio-cat">vector</p>
-            </div>
-          </article>
-
-          <article class="portfolio-card">
-            <a href="#" class="portfolio-thumb">
-              <img src="https://placehold.co/600x500/1dd1a1/ffffff?text=Web+UI+Kit" alt="Web UI Kit Design project">
-              <span class="portfolio-overlay"><i class="fa-solid fa-plus"></i></span>
-            </a>
-            <div class="portfolio-info">
-              <h3 class="portfolio-title">Web UI Kit Design</h3>
-              <p class="portfolio-cat">raster</p>
-            </div>
-          </article>
-
-          <article class="portfolio-card">
-            <a href="#" class="portfolio-thumb">
-              <img src="https://placehold.co/600x500/6c5ce7/ffffff?text=Brand+Identity" alt="Brand Identity Design project">
-              <span class="portfolio-overlay"><i class="fa-solid fa-plus"></i></span>
-            </a>
-            <div class="portfolio-info">
-              <h3 class="portfolio-title">Brand Identity Design</h3>
-              <p class="portfolio-cat">identity</p>
-            </div>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ======= Testimonials ======= -->
-    <section id="testimonials" class="testimonials">
-      <div class="container">
-        <div class="section-head">
-          <h2>Client's Feedback About Me</h2>
-          <p>It is very easy to start smoking but it is an uphill task to quit it. Ask any chain smoker or even a person.</p>
-        </div>
-
-        <div class="testi-slider" id="testi-slider">
-          <div class="testi-track">
-            <article class="testi-card">
-              <div class="testi-top">
-                <img src="https://randomuser.me/api/portraits/women/65.jpg" alt="Harriet Moreno avatar" class="testi-avatar">
-                <blockquote>
-                  <p>Do you want to be even more successful? Learn to love learning and growth. The more effort you put into improving your skills, the bigger the payoff you will get. Realize that things will be hard at first, but the rewards will be worth it.</p>
-                  <footer><cite>Harriet Moreno</cite></footer>
-                </blockquote>
-              </div>
-              <div class="testi-stars">
-                <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-              </div>
-            </article>
-
-            <article class="testi-card">
-              <div class="testi-top">
-                <img src="https://randomuser.me/api/portraits/women/44.jpg" alt="Carolyn Craig avatar" class="testi-avatar">
-                <blockquote>
-                  <p>A purpose is the eternal condition for success. Every former smoker can tell you just how hard it is to stop smoking cigarettes. However, it is possible if you make the right attempt and take it step by step.</p>
-                  <footer><cite>Carolyn Craig</cite></footer>
-                </blockquote>
-              </div>
-              <div class="testi-stars">
-                <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>
-              </div>
-            </article>
-          </div>
-        </div>
-
-        <div class="testi-nav">
-          <button class="testi-prev" aria-label="Previous testimonial"><i class="fa-solid fa-arrow-left"></i></button>
-          <button class="testi-next" aria-label="Next testimonial"><i class="fa-solid fa-arrow-right"></i></button>
-        </div>
-      </div>
-    </section>
-
-    <!-- ======= Blog ======= -->
-    <section id="blog" class="blog">
-      <div class="container">
-        <div class="section-head">
-          <h2>Latest Posts From Our Blog</h2>
-          <p>You may be a skillful, effective employer but if you don't trust your personnel and the opposite, then the chances of improving and expanding the business.</p>
-        </div>
-
-        <div class="blog-grid">
-          <article class="blog-card">
-            <div class="blog-thumb">
-              <img src="https://placehold.co/600x400/6c5ce7/ffffff?text=Blog+Post" alt="Blog thumbnail">
-            </div>
-            <div class="blog-body">
-              <div class="blog-meta">
-                <span class="blog-user"><i class="fa-regular fa-user"></i> Mark Wiens</span>
-                <span class="blog-date"><i class="fa-regular fa-calendar"></i> 13th Dec</span>
-              </div>
-              <h3 class="blog-title"><a href="#">Break Through Self Doubt And Fear</a></h3>
-              <p class="blog-text">Dream interpretation has many forms; it can be done for the sake of fun, hobby or can be taken up seriously for a certain purpose. For many of us the dream interpretation is a big deal.</p>
-            </div>
-          </article>
-
-          <article class="blog-card">
-            <div class="blog-thumb">
-              <img src="https://placehold.co/600x400/48dbfb/1b2a4a?text=Blog+Post" alt="Blog thumbnail">
-            </div>
-            <div class="blog-body">
-              <div class="blog-meta">
-                <span class="blog-user"><i class="fa-regular fa-user"></i> Mark Wiens</span>
-                <span class="blog-date"><i class="fa-regular fa-calendar"></i> 13th Dec</span>
-              </div>
-              <h3 class="blog-title"><a href="#">Portable Fashion For Young Women</a></h3>
-              <p class="blog-text">You may be a skillful, effective employer but if you don't trust your personnel and the opposite, then the chances of improving and expanding the business.</p>
-            </div>
-          </article>
-
-          <article class="blog-card">
-            <div class="blog-thumb">
-              <img src="https://placehold.co/600x400/ff9ff3/1b2a4a?text=Blog+Post" alt="Blog thumbnail">
-            </div>
-            <div class="blog-body">
-              <div class="blog-meta">
-                <span class="blog-user"><i class="fa-regular fa-user"></i> Mark Wiens</span>
-                <span class="blog-date"><i class="fa-regular fa-calendar"></i> 13th Dec</span>
-              </div>
-              <h3 class="blog-title"><a href="#">Do Dreams Serve As A Premonition</a></h3>
-              <p class="blog-text">So many of us are demotivated to achieve anything. Such people are not enthusiastic about anything. They don't want to work involved in the work.</p>
-            </div>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- ======= Client Logos ======= -->
-    <section class="clients">
-      <div class="container clients-row">
-        <span class="client-logo">Colorlib</span>
-        <span class="client-logo">Adobe</span>
-        <span class="client-logo">Behance</span>
-        <span class="client-logo">Slack</span>
-        <span class="client-logo">Dribbble</span>
-        <span class="client-logo">Dropebox</span>
-      </div>
-    </section>
-
-  </main>
-
-  <!-- ======= Footer ======= -->
-  <footer id="contact" class="footer">
-    <div class="container footer-grid">
-      <div class="footer-col footer-about">
-        <h3 class="footer-title">About Me</h3>
-        <p class="footer-text">
-          We have tested a number of registry fix and clean utilities and present our top 3 list on our site for your convenience.
-        </p>
-        <p class="footer-copy">
-          Copyright ©2026 All rights reserved | This template is made with <i class="fa-solid fa-heart"></i> by <span>Colorlib</span>
-        </p>
+  <!-- ============ AUTH MODAL ============ -->
+  <div class="modal-overlay hidden" id="auth-modal">
+    <div class="modal-box">
+      <button class="modal-close" data-close="auth-modal">&times;</button>
+      <div class="modal-title">&#128640; ASTRO BLAST</div>
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login" data-tab="login">MASUK</button>
+        <button class="auth-tab" id="tab-register" data-tab="register">DAFTAR</button>
       </div>
 
-      <div class="footer-col footer-newsletter">
-        <h3 class="footer-title">Newsletter</h3>
-        <p class="footer-text">Stay updated with our latest trends</p>
-        <form class="newsletter-form" id="newsletter-form">
-          <input type="email" name="email" placeholder="Enter Email Address" aria-label="Email address" required>
-          <button type="submit" class="newsletter-btn" aria-label="Subscribe"><i class="fa-solid fa-arrow-right"></i></button>
-        </form>
-      </div>
+      <form id="form-login" class="auth-form">
+        <label>Username</label>
+        <input type="text" id="login-user" autocomplete="username" required>
+        <label>Password</label>
+        <input type="password" id="login-pass" autocomplete="current-password" required>
+        <button type="submit" class="btn-submit">MASUK</button>
+        <div class="admin-hint">Akun Admin default: <b>menus233</b> / <b>12345</b></div>
+      </form>
 
-      <div class="footer-col footer-follow">
-        <h3 class="footer-title">Follow Me</h3>
-        <p class="footer-text">Let us be social</p>
-        <ul class="social-list">
-          <li><a href="#" aria-label="Facebook"><i class="fa-brands fa-facebook-f"></i></a></li>
-          <li><a href="#" aria-label="Twitter"><i class="fa-brands fa-twitter"></i></a></li>
-          <li><a href="#" aria-label="Dribbble"><i class="fa-brands fa-dribbble"></i></a></li>
-          <li><a href="#" aria-label="Behance"><i class="fa-brands fa-behance"></i></a></li>
-        </ul>
+      <form id="form-register" class="auth-form hidden">
+        <label>Username</label>
+        <input type="text" id="reg-user" required>
+        <label>Password</label>
+        <input type="password" id="reg-pass" required>
+        <label>Konfirmasi Password</label>
+        <input type="password" id="reg-pass2" required>
+        <button type="submit" class="btn-submit">DAFTAR</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ TOKEN REQUEST MODAL ============ -->
+  <div class="modal-overlay hidden" id="request-modal">
+    <div class="modal-box">
+      <button class="modal-close" data-close="request-modal">&times;</button>
+      <div class="modal-title">&#128142; REQUEST TOKEN</div>
+      <p class="modal-desc">Ajukan permintaan token ke Admin. Status akan berubah menjadi <b>Disetujui</b> / <b>Ditolak</b> setelah diproses.</p>
+      <label>Jumlah Token</label>
+      <input type="number" id="request-amount" min="1" placeholder="Contoh: 500">
+      <div class="modal-actions">
+        <button class="btn-submit" id="btn-submit-request">AJUKAN</button>
+        <button class="btn-ghost" data-close="request-modal">BATAL</button>
+      </div>
+      <div id="request-history">
+        <div class="req-hist-title">RIWAYAT REQUEST</div>
+        <div id="request-list"></div>
       </div>
     </div>
-  </footer>
+  </div>
 
-  <script src="js/main.js"></script>
+  <!-- ============ ADMIN DASHBOARD ============ -->
+  <div class="modal-overlay hidden" id="admin-modal">
+    <div class="admin-shell">
+      <div class="admin-sidebar">
+        <div class="admin-brand">&#129302; ADMIN PANEL</div>
+        <button class="admin-tab active" data-atab="overview">&#128202; Ringkasan</button>
+        <button class="admin-tab" data-atab="users">&#128101; Kelola User</button>
+        <button class="admin-tab" data-atab="requests">&#128176; Request Token</button>
+        <button class="admin-tab" data-atab="leaderboard">&#127942; Papan Peringkat</button>
+        <button class="admin-tab" data-atab="history">&#128220; Riwayat Game</button>
+        <button class="admin-tab danger" data-atab="tools">&#9888; Tools Admin</button>
+        <button class="admin-tab ghost" id="btn-admin-close">&#10006; Tutup</button>
+      </div>
+      <div class="admin-content">
+
+        <!-- OVERVIEW -->
+        <section class="admin-section active" id="atab-overview">
+          <h2>RINGKASAN SISTEM</h2>
+          <div class="stat-grid" id="stat-cards"></div>
+          <div id="overview-requests" class="overview-block"></div>
+        </section>
+
+        <!-- USERS -->
+        <section class="admin-section" id="atab-users">
+          <h2>MANAJEMEN USER</h2>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>User</th><th>Role</th><th>Token</th><th>Win</th><th>Lose</th><th>Perfect</th><th>Games</th><th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="users-table-body"></tbody>
+            </table>
+          </div>
+          <button class="btn-submit" id="btn-add-user">+ BUAT AKUN USER BARU</button>
+        </section>
+
+        <!-- REQUESTS -->
+        <section class="admin-section" id="atab-requests">
+          <h2>REQUEST TOKEN DARI PLAYER</h2>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead>
+                <tr><th>User</th><th>Jumlah</th><th>Tanggal</th><th>Status</th><th>Aksi</th></tr>
+              </thead>
+              <tbody id="requests-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- LEADERBOARD -->
+        <section class="admin-section" id="atab-leaderboard">
+          <h2>PAPAN PERINGKAT</h2>
+          <div id="admin-leaderboard"></div>
+        </section>
+
+        <!-- HISTORY -->
+        <section class="admin-section" id="atab-history">
+          <h2>RIWAYAT PERMAINAN</h2>
+          <div class="table-wrap">
+            <table class="admin-table">
+              <thead><tr><th>User</th><th>Hasil</th><th>Taruhan</th><th>Win</th><th>Waktu</th></tr></thead>
+              <tbody id="admin-history-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- TOOLS -->
+        <section class="admin-section" id="atab-tools">
+          <h2>TOOLS ADMIN</h2>
+          <div class="tool-grid">
+            <div class="tool-card">
+              <h3>Kirim Token Langsung</h3>
+              <select id="give-user"></select>
+              <input type="number" id="give-amount" min="1" placeholder="Jumlah token">
+              <button class="btn-submit" id="btn-give-tokens">KIRIM TOKEN</button>
+            </div>
+            <div class="tool-card">
+              <h3>Reset Semua Data</h3>
+              <p>Hapus seluruh akun, token, dan riwayat. Admin akan dibuat ulang.</p>
+              <button class="btn-danger" id="btn-reset-all">RESET SEMUA DATA</button>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ LEADERBOARD MODAL ============ -->
+  <div class="modal-overlay hidden" id="leaderboard-modal">
+    <div class="modal-box wide">
+      <button class="modal-close" data-close="leaderboard-modal">&times;</button>
+      <div class="modal-title">&#127942; PAPAN PERINGKAT</div>
+      <div id="leaderboard-list"></div>
+    </div>
+  </div>
+
+  <!-- ============ HISTORY MODAL ============ -->
+  <div class="modal-overlay hidden" id="history-modal">
+    <div class="modal-box wide">
+      <button class="modal-close" data-close="history-modal">&times;</button>
+      <div class="modal-title">&#128220; RIWAYAT PERMAINAN SAYA</div>
+      <div id="player-history-list"></div>
+    </div>
+  </div>
+
+  <!-- ============ TOAST ============ -->
+  <div id="toast-container"></div>
+
+  <!-- ============ MODAL TAMBAH USER ============ -->
+  <div class="modal-overlay hidden" id="adduser-modal">
+    <div class="modal-box">
+      <button class="modal-close" data-close="adduser-modal">&times;</button>
+      <div class="modal-title">+ BUAT AKUN USER BARU</div>
+      <label>Username</label>
+      <input type="text" id="au-user" required>
+      <label>Password</label>
+      <input type="text" id="au-pass" required>
+      <label>Token Awal</label>
+      <input type="number" id="au-tokens" min="0" value="100" required>
+      <div class="modal-actions">
+        <button class="btn-submit" id="btn-au-submit">BUAT AKUN</button>
+        <button class="btn-ghost" data-close="adduser-modal">BATAL</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="script.js"></script>
 </body>
 </html>

@@ -32,8 +32,8 @@ const SESSION_KEY = 'astro_blast_session_v2';
 const ADMIN_USER = 'menus233';
 const ADMIN_PASS = '12345';
 
-const PERFECT_ZONE = 18;   // batas "perfect stop" (di skala tersembunyi)
-const SAFE_ZONE = 52;      // batas "safe stop"
+const MIN_CRASH = 1.0;   // multiplier minimum
+const MAX_CRASH = 300.0; // multiplier maksimum (sangat langka)
 const CRASH_DIST = 2;
 const BOOST_LOCK_MS = 800;
 
@@ -65,6 +65,18 @@ function clamp(v, min, max) {
 }
 function randRange(min, max) {
   return min + Math.random() * (max - min);
+}
+
+/* Kurva peluang eksponensial: P(crash > x) = 1/x
+   => 2x sangat sering, 10x sedang, 50x jarang, 300x sangat langka. */
+function rollCrashPoint() {
+  const r = Math.random();
+  let cp = 1 / (1 - r);
+  return clamp(cp, MIN_CRASH, MAX_CRASH);
+}
+
+function fmtMult(m) {
+  return m.toFixed(1).replace('.', ',');
 }
 function mkUser(username, password, tokens, isAdmin) {
   return {
@@ -416,6 +428,7 @@ const Game = {
   ambientSpeed: 8,
   state: 'IDLE', // IDLE | FLYING | RESULT
   bet: 0,
+  crashPoint: 2.0,
   launchedAt: 0,
   shakeAmp: 0,
   steerX: 0,
@@ -839,6 +852,7 @@ function resetRun() {
   Game.hiddenRemaining = r.hiddenStart;
   Game.isDecoy = r.scenario === 'B';
   Game.currentSpeed = speedAt(Game.visualStart);
+  Game.crashPoint = rollCrashPoint();
 
   Game.target.material = Game.isDecoy ? Game.targetDecoyMat : Game.targetRealMat;
   Game.target.position.set(0, 0, -Game.visualStart);
@@ -852,6 +866,12 @@ function resetRun() {
 }
 
 /* ===================== GAME STATE & LOGIC ===================== */
+/* Multiplier saat ini: tumbuh linear dari 1.0x -> crashPoint sepanjang ronde. */
+function currentMult() {
+  const frac = Game.hiddenStart > 0 ? clamp(1 - Game.hiddenRemaining / Game.hiddenStart, 0, 1) : 0;
+  return 1 + (Game.crashPoint - 1) * frac;
+}
+
 function startRun(bet) {
   Game.bet = bet;
   resetRun();
@@ -874,17 +894,13 @@ function stopAstronaut() {
   const hr = Game.hiddenRemaining;
   const vr = Game.visualRemaining;
 
-  let outcome;
   if (hr <= CRASH_DIST || vr <= CRASH_DIST) {
-    outcome = 'crash';
-  } else if (hr <= PERFECT_ZONE) {
-    outcome = 'perfect';
-  } else if (hr <= SAFE_ZONE) {
-    outcome = 'safe';
-  } else {
-    outcome = 'tooearly';
+    finishRun('crash');
+    return;
   }
-  finishRun(outcome);
+
+  const mult = currentMult();
+  finishRun(mult <= 1.03 ? 'takeoff' : 'win');
 }
 
 function finishRun(outcome) {
@@ -897,33 +913,18 @@ function finishRun(outcome) {
 
   const user = getUser(currentUser);
   const bet = Game.bet;
+  const mult = currentMult();
 
-  if (outcome === 'safe') {
-    const win = bet * 2;
+  if (outcome === 'win') {
+    const win = Math.max(1, Math.round(bet * mult));
     user.tokens += win;
     user.stats.wins++;
     user.stats.gamesPlayed++;
-    pushHistory(user, 'SAFE', bet, win);
+    pushHistory(user, 'WIN', bet, win);
     Audio.safeWin();
-    toast(`SAFE STOP! +${fmt(win)} token (2x)`, 'success');
-    showResult('SAFE STOP', 'Berhenti dengan aman sebelum meteor! Hadiah 2x lipat', win, 'win');
-    spawnParticles(0x39ff8b, 0x00f0ff, 120, 9, Game.astronaut.position, 2.4);
-    Game.shakeAmp = 0.1;
-    triggerWinCelebration(2, win);
-  } else if (outcome === 'perfect') {
-    const win = bet * 3;
-    user.tokens += win;
-    user.stats.wins++;
-    user.stats.perfects++;
-    user.stats.gamesPlayed++;
-    pushHistory(user, 'PERFECT', bet, win);
-    Audio.perfectWin();
-    toast(`PERFECT STOP! +${fmt(win)} token (3x)`, 'gold');
-    showResult('PERFECT STOP', 'Berhenti di detik terakhir! Bonus 3x lipat!', win, 'perfect');
-    spawnParticles(0xffd24a, 0x39ff8b, 200, 12, Game.astronaut.position, 3);
-    Game.shakeAmp = 0.18;
-    triggerWinCelebration(3, win);
-  } else if (outcome === 'tooearly') {
+    toast(`SAFE STOP! +${fmt(win)} token (${fmtMult(mult)}x)`, 'success');
+    triggerWinCelebration(mult, win);
+  } else if (outcome === 'takeoff') {
     user.tokens += bet;
     user.stats.gamesPlayed++;
     pushHistory(user, 'TAKEOFF', bet, 0);
@@ -939,20 +940,15 @@ function finishRun(outcome) {
     Audio.explosion();
     setTimeout(() => Audio.lose(), 700);
     toast(`CRASH! -${fmt(bet)} token hangus`, 'error');
-    showResult('CRASH!', 'Astronot menabrak meteor... Token taruhan hangus', -bet, 'lose');
-    spawnParticles(0xff3b5c, 0xff7a3c, 180, 12, Game.astronaut.position, 3.5);
-    Game.shakeAmp = 0.45;
+    spawnParticles(0xff3b5c, 0xff7a3c, 220, 16, Game.astronaut.position, 4.2);
+    Game.shakeAmp = 0.6;
+    redFlash();
+    showCrashModal(mult, bet);
   }
 
   S.saveUser(user);
   updateTokenUI();
   updateLeaderboards();
-  setTimeout(() => {
-    if (Game.state === 'RESULT') {
-      Game.state = 'IDLE';
-      resetRun();
-    }
-  }, 5000);
 }
 
 function pushHistory(user, result, bet, delta) {
@@ -1001,42 +997,67 @@ function countUp(el, target, dur) {
 }
 
 function showVictoryModal(mult, win) {
-  const isPerfect = mult >= 3;
-  $('#victory-title').innerHTML = isPerfect
-    ? '&#128081; PERFECT LANDING!'
-    : '&#128640; PENERBANGAN BERHASIL!';
-  $('#victory-sub').textContent = isPerfect ? 'WIN! PERFECT!' : 'WIN!';
-  $('#victory-mult').textContent = mult.toFixed(1).replace('.', ',') + 'x MULTIPLIER';
+  $('#victory-title').innerHTML = '&#128640; PENERBANGAN SUKSES!';
+  $('#victory-sub').textContent = 'WIN! SAFE STOP';
+  $('#victory-mult').textContent = fmtMult(mult) + 'x MULTIPLIER';
   $('#victory-count').textContent = '0';
-  const box = $('.victory-box');
-  box.classList.toggle('perfect', isPerfect);
+  $('.victory-box').classList.remove('perfect');
   openModal('victory-modal');
   setTimeout(() => countUp($('#victory-count'), win, 1400), 300);
 }
 
-// Efek selebrasi lengkap saat astronot selamat (Safe/Perfect)
+function showCrashModal(crashMult, bet) {
+  $('#crash-mult-value').textContent = fmtMult(crashMult) + 'x';
+  $('#crash-count').textContent = '0';
+  openModal('crash-modal');
+  setTimeout(() => countUp($('#crash-count'), bet, 1200), 300);
+}
+
+function redFlash() {
+  const el = $('#red-flash');
+  el.classList.remove('on');
+  void el.offsetWidth;
+  el.classList.add('on');
+}
+
+/* Reset state secara bersih — dipakai tombol "MAIN LAGI" agar tidak macet di ronde berikutnya */
+function resetGameState() {
+  Game.state = 'IDLE';
+  Game.shakeAmp = 0;
+  resetRun();
+  clearParticles();
+  $('#result-banner').classList.add('hidden');
+  closeModal('victory-modal');
+  closeModal('crash-modal');
+  $('#btn-stop').classList.add('hidden');
+  $('#btn-launch').classList.remove('hidden');
+  $('#bet-title-label').textContent = 'TARUHAN TOKEN';
+  $('#danger-glow').style.opacity = 0;
+  const rf = $('#red-flash');
+  if (rf) rf.classList.remove('on');
+}
+
+// Efek selebrasi lengkap saat astronot selamat (cashout / safe stop)
 function triggerWinCelebration(mult, win) {
-  screenFlash(mult >= 3 ? 'rgba(255,210,74,0.4)' : 'rgba(57,255,139,0.32)');
-  floatingText(mult.toFixed(1).replace('.', ',') + 'x MULTIPLIER!');
-  spawnParticles(0xffd24a, 0xffffff, 170, 14, Game.astronaut.position, 3.4);
+  screenFlash('radial-gradient(circle, rgba(57,255,139,0.45), rgba(255,210,74,0.35) 40%, transparent 78%)');
+  floatingText(`+${fmt(win)} TOKEN (${fmtMult(mult)}x)`);
+  spawnParticles(0xffd24a, 0x39ff8b, 220, 15, Game.astronaut.position, 3.8);
   Audio.celebration();
   showVictoryModal(mult, win);
 }
 
-/* HUD hanya menampilkan multiplier & potensi menang — TANPA JARAK */
+/* HUD hanya menampilkan multiplier dinamis & potensi menang — TANPA JARAK */
 function updateHUDVisual() {
   const frac = Game.hiddenStart > 0 ? clamp(Game.hiddenRemaining / Game.hiddenStart, 0, 1) : 0;
   const danger = clamp((1 - frac) * 1.5, 0, 1);
   const glow = $('#danger-glow');
   if (glow) glow.style.opacity = (danger * danger * 0.8).toFixed(3);
 
-  let mult = 1;
-  if (Game.hiddenRemaining <= PERFECT_ZONE) mult = 3;
-  else if (Game.hiddenRemaining <= SAFE_ZONE) mult = 2;
+  const mult = currentMult();
   const mEl = $('#mult-label');
-  mEl.textContent = (mult === 1 ? '1.0x' : mult + '.0x');
-  mEl.style.transform = mult === 3 ? 'scale(1.15)' : '';
-  $('#potential-win').textContent = fmt(Game.bet * mult);
+  mEl.textContent = fmtMult(mult) + 'x';
+  mEl.style.transform = mult >= 1.1 ? 'scale(1.1)' : '';
+  $('#potential-win').textContent = fmt(Math.round(Game.bet * mult));
 }
 
 /* ===================== FLIGHT LOOP ===================== */
@@ -1256,14 +1277,14 @@ function statusLabel(s) {
 }
 function resultColor(r) {
   if (r === 'CRASH') return 'var(--neon-red)';
-  if (r === 'PERFECT') return 'var(--neon-gold)';
-  if (r === 'SAFE') return 'var(--neon-green)';
+  if (r === 'WIN') return 'var(--neon-green)';
+  if (r === 'TAKEOFF') return 'var(--text-dim)';
   return 'var(--text-dim)';
 }
 function resultClass(r) {
   if (r === 'CRASH') return 'lose';
-  if (r === 'PERFECT') return 'perfect';
-  if (r === 'SAFE') return 'win';
+  if (r === 'WIN') return 'win';
+  if (r === 'TAKEOFF') return 'takeoff';
   return '';
 }
 
@@ -1696,18 +1717,14 @@ function bindUI() {
     });
   });
 
-  // Bet chips
-  $$('.chip[data-add]').forEach((c) => {
-    c.addEventListener('click', () => {
-      const add = parseInt(c.dataset.add, 10);
-      const inp = $('#bet-input');
-      inp.value = (parseInt(inp.value, 10) || 0) + add;
-    });
-  });
+  // Bet input: MAX = isi seluruh saldo
   $('#bet-max').addEventListener('click', () => {
     if (currentUser) {
       const u = getUser(currentUser);
       $('#bet-input').value = Math.max(1, u.tokens);
+    } else {
+      toast('Silakan login dahulu!', 'error');
+      openAuthModal(false);
     }
   });
 
@@ -1718,6 +1735,7 @@ function bindUI() {
       openAuthModal(false);
       return;
     }
+    if (Game.state !== 'IDLE') resetGameState();
     const u = getUser(currentUser);
     const bet = parseInt($('#bet-input').value, 10);
     if (!bet || bet < 1) {
@@ -1739,18 +1757,11 @@ function bindUI() {
     stopAstronaut();
   });
 
-  $('#btn-replay').addEventListener('click', () => {
-    $('#result-banner').classList.add('hidden');
-    Game.state = 'IDLE';
-    resetRun();
-  });
+  $('#btn-replay').addEventListener('click', resetGameState);
 
-  $('#btn-victory-ok').addEventListener('click', () => {
-    closeModal('victory-modal');
-    $('#result-banner').classList.add('hidden');
-    Game.state = 'IDLE';
-    resetRun();
-  });
+  $('#btn-victory-ok').addEventListener('click', resetGameState);
+
+  $('#btn-crash-ok').addEventListener('click', resetGameState);
 
   // Keyboard
   window.addEventListener('keydown', (e) => {

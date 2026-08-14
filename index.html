@@ -21,6 +21,9 @@
   <!-- Vignette bahaya (feedback visual tanpa angka jarak) -->
   <div id="danger-glow"></div>
 
+  <!-- Disclaimer simulasi (pojok layar) -->
+  <div id="disclaimer">&#9888;&#65039; Game Simulasi - Hanya Menggunakan Token Virtual (Bukan Uang Sungguhan)</div>
+
   <!-- ============ NAVBAR (ringkas, menu hamburger) ============ -->
   <header id="navbar">
     <div class="nav-left">
@@ -63,7 +66,7 @@
   <div id="hud" class="hidden">
     <div class="hud-pill">
       <span class="hud-label">MULTIPLIER</span>
-      <span id="mult-label" class="mult">2.0x</span>
+      <span id="mult-label" class="mult">1.0x</span>
     </div>
     <div class="hud-pill">
       <span class="hud-label">POTENSI MENANG</span>
@@ -76,12 +79,8 @@
     <div class="bet-box">
       <div class="bet-title" id="bet-title-label">TARUHAN TOKEN</div>
       <div class="bet-input-row">
-        <button class="chip" data-add="10">+10</button>
-        <button class="chip" data-add="50">+50</button>
-        <button class="chip" data-add="100">+100</button>
-        <button class="chip" data-add="500">+500</button>
-        <button class="chip" id="bet-max">MAX</button>
         <input type="number" id="bet-input" min="1" placeholder="Token" value="10" inputmode="numeric">
+        <button class="chip" id="bet-max">MAX</button>
       </div>
       <button class="btn-play" id="btn-launch">&#128640; LUNCURKAN</button>
       <button class="btn-stop hidden" id="btn-stop">&#9209; BERHENTI!</button>
@@ -262,17 +261,31 @@
   <!-- Screen flash (kilatan layar saat menang) -->
   <div id="screen-flash"></div>
 
+  <!-- Red flash vignette (kilatan merah saat kalah) -->
+  <div id="red-flash"></div>
+
   <!-- Floating text multiplier -->
   <div id="float-text"></div>
 
   <!-- ============ VICTORY / WIN MODAL ============ -->
   <div class="modal-overlay hidden" id="victory-modal">
     <div class="victory-box">
-      <div class="victory-title" id="victory-title">&#128640; PENERBANGAN BERHASIL!</div>
-      <div class="victory-sub">WIN!</div>
+      <div class="victory-title" id="victory-title">&#128640; PENERBANGAN SUKSES!</div>
+      <div class="victory-sub">WIN! SAFE STOP</div>
       <div class="victory-mult" id="victory-mult">2.0x MULTIPLIER</div>
       <div class="victory-amount"><span id="victory-count">0</span> TOKEN</div>
       <button class="btn-play small" id="btn-victory-ok">&#127881; LUAR BIASA!</button>
+    </div>
+  </div>
+
+  <!-- ============ CRASH / LOSE MODAL ============ -->
+  <div class="modal-overlay hidden" id="crash-modal">
+    <div class="crash-box">
+      <div class="crash-title">&#128165; CRASH! ASTRONOT TERTABRAK METEOR</div>
+      <div class="crash-sub">Token taruhan hangus</div>
+      <div class="crash-mult">Tabrakan pada <span id="crash-mult-value">0x</span></div>
+      <div class="crash-amount"><span id="crash-count">0</span> TOKEN HILANG</div>
+      <button class="btn-play small" id="btn-crash-ok">&#128260; MAIN LAGI</button>
     </div>
   </div>
 

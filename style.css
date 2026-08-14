@@ -83,6 +83,20 @@ input { font-size: 16px; }
     rgba(255, 59, 92, 0.5) 100%);
 }
 
+/* ============ DISCLAIMER SIMULASI (pojok bawah kanan) ============ */
+#disclaimer {
+  position: fixed;
+  bottom: calc(150px + env(safe-area-inset-bottom));
+  right: 12px;
+  z-index: 20;
+  pointer-events: none;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: rgba(219, 231, 255, 0.35);
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+}
+
 /* ============ NAVBAR (satu baris ringkas) ============ */
 #navbar {
   position: fixed;
@@ -292,16 +306,17 @@ input { font-size: 16px; }
   font-weight: 700;
   cursor: pointer;
   transition: all 0.15s;
-  flex: 1;
+  flex: 0 0 auto;
+  min-width: 84px;
   text-align: center;
   min-height: 40px;
   white-space: nowrap;
 }
 .chip:hover, .chip:active { background: var(--neon-cyan-dim); box-shadow: 0 0 10px var(--neon-cyan-dim); }
 #bet-input {
-  flex: 2;
+  flex: 1;
   min-width: 0;
-  width: 0;
+  width: 100%;
   padding: 9px 8px;
   background: rgba(0,0,0,0.4);
   border: 1px solid var(--neon-magenta);
@@ -941,6 +956,27 @@ input { font-size: 16px; }
   100% { opacity: 0; transform: translate(-50%, -75%) scale(1.6); }
 }
 
+/* Red flash vignette (kilatan merah saat kalah) */
+#red-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 250;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at center,
+    transparent 42%,
+    rgba(255, 30, 50, 0.28) 72%,
+    rgba(255, 0, 30, 0.7) 100%);
+}
+#red-flash.on {
+  animation: redFlash 0.9s ease-out forwards;
+}
+@keyframes redFlash {
+  0% { opacity: 0; }
+  25% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 /* Victory / Win modal neon */
 #victory-modal { z-index: 500; }
 .victory-box {
@@ -1005,6 +1041,68 @@ input { font-size: 16px; }
   letter-spacing: 1px;
 }
 #victory-modal .btn-play { margin-top: 6px; }
+
+/* ============ CRASH / LOSE MODAL ============ */
+#crash-modal { z-index: 500; }
+.crash-box {
+  width: min(90vw, 420px);
+  text-align: center;
+  padding: 34px 26px;
+  background: radial-gradient(circle at 50% 0%, rgba(255,59,92,0.18), rgba(5,6,15,0.95) 70%);
+  border: 1px solid rgba(255,59,92,0.7);
+  border-radius: 18px;
+  box-shadow: 0 0 34px rgba(255,59,92,0.4), 0 0 90px rgba(255,59,92,0.18);
+  animation: crashPop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes crashPop {
+  0% { transform: scale(0.4); opacity: 0; }
+  30% { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+.crash-title {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(20px, 6vw, 30px);
+  letter-spacing: 1px;
+  line-height: 1.2;
+  color: var(--neon-red);
+  text-shadow: 0 0 14px rgba(255,59,92,0.85), 0 0 46px rgba(255,59,92,0.5);
+  margin-bottom: 6px;
+  animation: crashGlow 0.7s ease-in-out infinite alternate;
+}
+@keyframes crashGlow {
+  from { filter: brightness(1); }
+  to { filter: brightness(1.6); }
+}
+.crash-sub {
+  font-size: 13px;
+  letter-spacing: 4px;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+.crash-mult {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(16px, 5vw, 22px);
+  color: var(--neon-red);
+  text-shadow: 0 0 12px rgba(255,59,92,0.6);
+  margin-bottom: 14px;
+}
+.crash-mult span {
+  color: var(--neon-gold);
+  text-shadow: 0 0 14px rgba(255,210,74,0.8);
+}
+.crash-amount {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(30px, 10vw, 48px);
+  color: var(--neon-red);
+  text-shadow: 0 0 16px rgba(255,59,92,0.9), 0 0 60px rgba(255,59,92,0.5);
+  margin: 10px 0 22px;
+  letter-spacing: 1px;
+}
+#crash-modal .btn-play { margin-top: 6px; background: linear-gradient(90deg, var(--neon-red), #ff7a3c); }
+#crash-modal .btn-play:hover { box-shadow: 0 0 22px rgba(255,59,92,0.6); }
 
 /* ============ WELCOME SCREEN ============ */
 #welcome-screen {
@@ -1078,10 +1176,12 @@ input { font-size: 16px; }
 
   #bet-panel { padding: 6px 8px calc(8px + env(safe-area-inset-bottom)); }
   .bet-title { font-size: 9px; margin-bottom: 5px; }
-  .chip { padding: 9px 4px; font-size: 9px; min-height: 38px; }
+  .chip { padding: 9px 4px; font-size: 9px; min-height: 38px; min-width: 68px; }
   #bet-input { padding: 8px 6px; font-size: 15px; min-height: 38px; }
   .btn-play, .btn-stop { padding: 14px; font-size: 15px; letter-spacing: 2px; }
   .bet-hint { display: none; }
+
+  #disclaimer { bottom: calc(128px + env(safe-area-inset-bottom)); right: 10px; font-size: 9px; }
 
   #result-inner { padding: 18px 22px; }
   #result-title { font-size: 22px; }
@@ -1132,4 +1232,5 @@ input { font-size: 16px; }
   #welcome-screen .big-title { font-size: clamp(22px, 8vh, 36px); }
   #welcome-screen .big-cta { padding: 11px 22px; font-size: 12px; margin-top: 14px; }
   .menu-dropdown { max-height: 80vh; overflow-y: auto; }
+  #disclaimer { bottom: calc(92px + env(safe-area-inset-bottom)); }
 }

@@ -93,6 +93,12 @@
     </div>
   </div>
 
+  <!-- ============ MOBILE CONTROL BAR (THUMB ZONE) ============ -->
+  <div id="mobile-controls" class="hidden">
+    <button class="mobile-btn launch" id="btn-launch-mobile">&#128640; LUNCURKAN</button>
+    <button class="mobile-btn stop" id="btn-stop-mobile">&#9209; BERHENTI!</button>
+  </div>
+
   <!-- ============ RESULT BANNER ============ -->
   <div id="result-banner" class="hidden">
     <div id="result-inner">
@@ -159,7 +165,7 @@
         <div class="admin-brand">&#129302; ADMIN PANEL</div>
         <button class="admin-tab active" data-atab="overview">&#128202; Ringkasan</button>
         <button class="admin-tab" data-atab="users">&#128101; Kelola User</button>
-        <button class="admin-tab" data-atab="requests">&#128176; Request Token</button>
+        <button class="admin-tab" data-atab="requests">&#128176; Request Token <span class="tab-badge hidden" id="req-badge">0</span></button>
         <button class="admin-tab" data-atab="leaderboard">&#127942; Papan Peringkat</button>
         <button class="admin-tab" data-atab="history">&#128220; Riwayat Game</button>
         <button class="admin-tab danger" data-atab="tools">&#9888; Tools Admin</button>
@@ -192,7 +198,7 @@
 
         <!-- REQUESTS -->
         <section class="admin-section" id="atab-requests">
-          <h2>REQUEST TOKEN DARI PLAYER</h2>
+          <h2>PERMINTAAN TOKEN MASUK <span id="req-count-label" style="font-size:12px;color:var(--neon-cyan)"></span></h2>
           <div class="table-wrap">
             <table class="admin-table">
               <thead>

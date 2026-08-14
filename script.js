@@ -12,7 +12,10 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
-const STORAGE_KEY = 'astro_blast_data_v1';
+// Struktur data global di localStorage
+const USERS_KEY = 'astro_blast_users_v1';       // usersData
+const REQUESTS_KEY = 'astro_blast_requests_v1'; // tokenRequestsData
+const STORAGE_KEY = 'astro_blast_data_v1';      // legacy (hanya untuk migrasi)
 const SESSION_KEY = 'astro_blast_session_v1';
 const ADMIN_USER = 'menus233';
 const ADMIN_PASS = '12345';
@@ -36,23 +39,74 @@ function randRange(min, max) {
 }
 
 /* ===================== STORAGE ===================== */
-let db = null;
+let db = { users: {} };          // usersData: objek user (key = username)
+let tokenRequestsData = [];      // tokenRequestsData: array permintaan token global
+
+function usersData() {
+  return db.users;
+}
 
 function loadDB() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      db = JSON.parse(raw);
-      if (db && db.users) return;
-    }
+    const rawUsers = localStorage.getItem(USERS_KEY);
+    db.users = rawUsers ? JSON.parse(rawUsers) : {};
+    const rawReqs = localStorage.getItem(REQUESTS_KEY);
+    tokenRequestsData = rawReqs ? JSON.parse(rawReqs) : [];
+  } catch (e) {
+    db.users = {};
+    tokenRequestsData = [];
+  }
+  // Migrasi data dari versi lama (satu objek db) bila masih ada
+  migrateLegacyData();
+  // Pastikan akun admin selalu tersedia
+  if (!db.users[ADMIN_USER]) addUserRecord(ADMIN_USER, ADMIN_PASS, 100000, true);
+  saveDB();
+}
+
+function loadFresh() {
+  // Baca ulang data TERBARU langsung dari localStorage
+  // Dipanggil tiap kali Admin membuka dashboard / interval real-time
+  try {
+    const rawUsers = localStorage.getItem(USERS_KEY);
+    if (rawUsers) db.users = JSON.parse(rawUsers);
+    const rawReqs = localStorage.getItem(REQUESTS_KEY);
+    if (rawReqs) tokenRequestsData = JSON.parse(rawReqs);
   } catch (e) { /* corrupted */ }
-  seedDB();
+}
+
+function migrateLegacyData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const old = JSON.parse(raw);
+    if (old && old.users) {
+      Object.entries(old.users).forEach(([name, u]) => {
+        if (!db.users[name]) {
+          db.users[name] = {
+            username: name,
+            password: u.password || '1234',
+            tokens: u.tokens || 0,
+            isAdmin: !!u.isAdmin,
+            createdAt: u.createdAt || nowStr(),
+            stats: u.stats || { wins: 0, losses: 0, perfects: 0, gamesPlayed: 0 },
+            history: u.history || []
+          };
+        }
+        // Pindahkan request lama (per-user) ke tokenRequestsData global
+        (u.requests || []).forEach((r) => {
+          if (!tokenRequestsData.some((t) => t.id === r.id)) {
+            tokenRequestsData.push({ id: r.id || uid(), username: name, amount: r.amount, status: r.status || 'pending', date: r.date || nowStr() });
+          }
+        });
+      });
+    }
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (e) { /* corrupted legacy */ }
 }
 
 function seedDB() {
-  db = {
-    users: {}
-  };
+  db.users = {};
+  tokenRequestsData = [];
   addUserRecord(ADMIN_USER, ADMIN_PASS, 100000, true);
   saveDB();
 }
@@ -64,7 +118,6 @@ function addUserRecord(username, password, tokens, isAdmin) {
     tokens: tokens || 0,
     isAdmin: !!isAdmin,
     createdAt: nowStr(),
-    requests: [],
     stats: { wins: 0, losses: 0, perfects: 0, gamesPlayed: 0 },
     history: []
   };
@@ -72,7 +125,8 @@ function addUserRecord(username, password, tokens, isAdmin) {
 
 function saveDB() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+    localStorage.setItem(USERS_KEY, JSON.stringify(db.users));
+    localStorage.setItem(REQUESTS_KEY, JSON.stringify(tokenRequestsData));
   } catch (e) { /* full storage */ }
 }
 
@@ -661,6 +715,8 @@ function startRun(bet) {
   Audio.launch();
   $('#btn-launch').classList.add('hidden');
   $('#btn-stop').classList.remove('hidden');
+  $('#btn-launch-mobile').classList.add('hidden');
+  $('#btn-stop-mobile').classList.remove('hidden');
   $('#bet-panel .bet-title').textContent = 'TERBANG! TAHAN & HENTIKAN!';
 }
 
@@ -701,6 +757,8 @@ function finishRun(outcome) {
   Game.flame.visible = false;
   $('#btn-stop').classList.add('hidden');
   $('#btn-launch').classList.remove('hidden');
+  $('#btn-stop-mobile').classList.add('hidden');
+  $('#btn-launch-mobile').classList.remove('hidden');
   $('#bet-panel .bet-title').textContent = 'TARUHAN TOKEN';
 
   const user = getUser(currentUser);
@@ -921,6 +979,8 @@ function logout() {
     resetRun();
     $('#btn-stop').classList.add('hidden');
     $('#btn-launch').classList.remove('hidden');
+    $('#btn-stop-mobile').classList.add('hidden');
+    $('#btn-launch-mobile').classList.remove('hidden');
     $('#bet-panel .bet-title').textContent = 'TARUHAN TOKEN';
     $('#result-banner').classList.add('hidden');
   }
@@ -939,6 +999,9 @@ function applyLoginUI() {
   $('#user-name-label').textContent = u.isAdmin ? 'ADMIN' : u.username;
   $('#hud').classList.remove('hidden');
   $('#bet-panel').classList.remove('hidden');
+  $('#mobile-controls').classList.remove('hidden');
+  $('#btn-launch-mobile').classList.remove('hidden');
+  $('#btn-stop-mobile').classList.add('hidden');
   $('#welcome-screen').classList.add('hidden');
   updateTokenUI();
 }
@@ -952,6 +1015,7 @@ function applyGuestUI() {
   $('#badge-admin').classList.add('hidden');
   $('#hud').classList.add('hidden');
   $('#bet-panel').classList.add('hidden');
+  $('#mobile-controls').classList.add('hidden');
   $('#result-banner').classList.add('hidden');
   $('#welcome-screen').classList.remove('hidden');
 }
@@ -985,13 +1049,15 @@ function openAuthModal(admin) {
 
 /* ===================== TOKEN REQUEST (PLAYER) ===================== */
 function renderPlayerRequests() {
-  const u = getUser(currentUser);
   const list = $('#request-list');
-  if (!u.requests.length) {
+  const mine = tokenRequestsData
+    .filter((r) => r.username === currentUser)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  if (!mine.length) {
     list.innerHTML = '<div class="hist-empty">Belum ada request.</div>';
     return;
   }
-  list.innerHTML = u.requests.map((r) => `
+  list.innerHTML = mine.map((r) => `
     <div class="req-item">
       <span class="amt">&#128142; ${fmt(r.amount)}</span>
       <span>${r.date}</span>
@@ -1021,8 +1087,8 @@ function submitRequest() {
     toast('Masukkan jumlah token valid', 'error');
     return;
   }
-  const u = getUser(currentUser);
-  u.requests.push({ id: uid(), amount, status: 'pending', date: nowStr() });
+  // Simpan ke tokenRequestsData global (langsung terlihat oleh Admin)
+  tokenRequestsData.push({ id: uid(), username: currentUser, amount, status: 'pending', date: nowStr() });
   saveDB();
   Audio.requestSent();
   toast('Request token dikirim ke admin!', 'success');
@@ -1033,12 +1099,29 @@ function submitRequest() {
 /* ===================== ADMIN DASHBOARD ===================== */
 function renderAdminDashboard() {
   if (currentUser && !getUser(currentUser).isAdmin) return;
+  // Ambil data terbaru langsung dari localStorage agar user/request baru
+  // yang didaftarkan dari halaman lain langsung tercatat (real-time)
+  loadFresh();
   renderStats();
   renderAdminUsers();
   renderAdminRequests();
   renderAdminLeaderboard();
   renderAdminHistory();
   renderGiveSelect();
+  updateAdminRequestBadge();
+}
+
+function updateAdminRequestBadge() {
+  const pending = tokenRequestsData.filter((r) => r.status === 'pending').length;
+  const badge = $('#req-badge');
+  if (badge) {
+    badge.textContent = pending > 99 ? '99+' : pending;
+    badge.classList.toggle('hidden', pending === 0);
+  }
+  const countLabel = $('#req-count-label');
+  if (countLabel) {
+    countLabel.textContent = pending > 0 ? `(${pending} menunggu)` : '';
+  }
 }
 
 function allUsersArr() {
@@ -1048,7 +1131,7 @@ function allUsersArr() {
 function renderStats() {
   const users = Object.values(db.users);
   const totalTokens = users.reduce((s, u) => s + u.tokens, 0);
-  const pending = users.reduce((s, u) => s + u.requests.filter((r) => r.status === 'pending').length, 0);
+  const pending = tokenRequestsData.filter((r) => r.status === 'pending').length;
   const totalGames = users.reduce((s, u) => s + u.stats.gamesPlayed, 0);
   $('#stat-cards').innerHTML = `
     <div class="stat-card"><div class="num">${users.length}</div><div class="lbl">TOTAL USER</div></div>
@@ -1056,12 +1139,12 @@ function renderStats() {
     <div class="stat-card"><div class="num">${pending}</div><div class="lbl">REQUEST PENDING</div></div>
     <div class="stat-card"><div class="num">${totalGames}</div><div class="lbl">TOTAL GAME</div></div>
   `;
-  const pendUsers = users.filter((u) => u.requests.some((r) => r.status === 'pending'));
+  const pendReqs = tokenRequestsData.filter((r) => r.status === 'pending');
   $('#overview-requests').innerHTML = `
-    <h3>&#128176; REQUEST MENUNGGU PERSETUJUAN</h3>
-    ${pendUsers.length
-      ? pendUsers.map((u) => u.requests.filter((r) => r.status === 'pending').map((r) =>
-          `<div class="req-item"><span><b>${u.username}</b></span><span class="amt">&#128142; ${fmt(r.amount)}</span><span>${r.date}</span></div>`).join('')).join('')
+    <h3>&#128176; PERMINTAAN TOKEN MASUK (MENUNGGU)</h3>
+    ${pendReqs.length
+      ? pendReqs.map((r) =>
+          `<div class="req-item"><span><b>${r.username}</b></span><span class="amt">&#128142; ${fmt(r.amount)}</span><span>${r.date}</span></div>`).join('')
       : '<div class="hist-empty">Tidak ada request pending.</div>'}
   `;
 }
@@ -1089,27 +1172,21 @@ function renderAdminUsers() {
 }
 
 function renderAdminRequests() {
-  const rows = [];
-  Object.values(db.users).forEach((u) => {
-    u.requests.forEach((r) => {
-      rows.push({ user: u.username, r });
-    });
-  });
-  rows.sort((a, b) => {
+  const rows = [...tokenRequestsData].sort((a, b) => {
     const o = { pending: 0, approved: 1, rejected: 2 };
-    return o[a.r.status] - o[b.r.status];
+    return (o[a.status] || 2) - (o[b.status] || 2) || (b.date || '').localeCompare(a.date || '');
   });
   $('#requests-table-body').innerHTML = rows.length
-    ? rows.map(({ user, r }) => `
+    ? rows.map((r) => `
       <tr>
-        <td>${user}</td>
+        <td>${r.username}</td>
         <td style="color:var(--neon-gold);font-weight:700">${fmt(r.amount)}</td>
         <td>${r.date}</td>
         <td><span class="req-status ${r.status}">${statusLabel(r.status)}</span></td>
         <td>
           ${r.status === 'pending' ? `
-            <button class="tbl-btn green" data-approve="${user}" data-req="${r.id}">SETUJUI</button>
-            <button class="tbl-btn red" data-reject="${user}" data-req="${r.id}">TOLAK</button>
+            <button class="tbl-btn green" data-approve="${r.username}" data-req="${r.id}">SETUJUI</button>
+            <button class="tbl-btn red" data-reject="${r.username}" data-req="${r.id}">TOLAK</button>
           ` : '<span style="color:var(--text-dim)">-</span>'}
         </td>
       </tr>`).join('')
@@ -1170,12 +1247,11 @@ function updateLeaderboards() {
 
 /* ---------- ADMIN ACTIONS ---------- */
 function approveRequest(userName, reqId) {
-  const u = getUser(userName);
-  if (!u) return;
-  const req = u.requests.find((r) => r.id === reqId);
+  const req = tokenRequestsData.find((r) => r.id === reqId);
   if (!req || req.status !== 'pending') return;
   req.status = 'approved';
-  u.tokens += req.amount;
+  const u = getUser(userName);
+  if (u) u.tokens += req.amount;
   saveDB();
   Audio.coins();
   toast(`Request ${fmt(req.amount)} token untuk ${userName} disetujui!`, 'success');
@@ -1184,9 +1260,7 @@ function approveRequest(userName, reqId) {
 }
 
 function rejectRequest(userName, reqId) {
-  const u = getUser(userName);
-  if (!u) return;
-  const req = u.requests.find((r) => r.id === reqId);
+  const req = tokenRequestsData.find((r) => r.id === reqId);
   if (!req || req.status !== 'pending') return;
   req.status = 'rejected';
   saveDB();
@@ -1254,6 +1328,8 @@ function createUserByAdmin(username, password, tokens) {
 
 function resetAllData() {
   if (!confirm('HAPUS SEMUA DATA? Seluruh akun user, token, dan riwayat akan terhapus permanen. Admin dibuat ulang.')) return;
+  localStorage.removeItem(USERS_KEY);
+  localStorage.removeItem(REQUESTS_KEY);
   localStorage.removeItem(STORAGE_KEY);
   seedDB();
   if (currentUser && !getUser(currentUser)) {
@@ -1400,6 +1476,19 @@ function bindUI() {
     stopAstronaut();
   });
 
+  // ===== Mobile thumb-zone controls (meluncur / berhenti) =====
+  $('#btn-launch-mobile').addEventListener('click', () => {
+    if (!$('#btn-launch-mobile').classList.contains('hidden')) $('#btn-launch').click();
+  });
+  const triggerStop = (e) => {
+    if (e.cancelable) e.preventDefault();
+    if ($('#btn-stop-mobile').classList.contains('hidden')) return;
+    $('#btn-stop').click();
+  };
+  ['pointerdown', 'touchstart', 'mousedown'].forEach((ev) => {
+    $('#btn-stop-mobile').addEventListener(ev, triggerStop);
+  });
+
   $('#btn-replay').addEventListener('click', () => {
     $('#result-banner').classList.add('hidden');
     Game.state = 'IDLE';
@@ -1495,6 +1584,35 @@ function bindUI() {
   $('#btn-reset-all').addEventListener('click', resetAllData);
 }
 
+/* ---------- REAL-TIME ADMIN SYNC ---------- */
+let adminLiveTimer = null;
+function startAdminLiveRefresh() {
+  if (adminLiveTimer) return;
+  // Sinkron antar-tab (user baru daftar di tab lain langsung muncul)
+  window.addEventListener('storage', onStorageSync);
+  // Refresh berkala selama dashboard admin terbuka
+  adminLiveTimer = setInterval(() => {
+    if (!currentUser) return;
+    const u = getUser(currentUser);
+    if (!u || !u.isAdmin) return;
+    if (!$('#admin-modal').classList.contains('hidden')) {
+      renderAdminDashboard();
+      updateTokenUI();
+    }
+  }, 2500);
+}
+
+function onStorageSync(e) {
+  // Terima perubahan data dari tab lain tanpa harus reload halaman
+  if (e.key === USERS_KEY || e.key === REQUESTS_KEY) {
+    loadFresh();
+    if (currentUser) updateTokenUI();
+    if ($('#admin-modal') && !$('#admin-modal').classList.contains('hidden')) {
+      renderAdminDashboard();
+    }
+  }
+}
+
 function switchAuthTab(tab) {
   $('#tab-login').classList.toggle('active', tab === 'login');
   $('#tab-register').classList.toggle('active', tab === 'register');
@@ -1530,6 +1648,7 @@ function boot() {
   loadDB();
   bindUI();
   initThree();
+  startAdminLiveRefresh();
 
   const isAdmin = currentUser && getUser(currentUser) && getUser(currentUser).isAdmin;
   if (!isAdmin) {

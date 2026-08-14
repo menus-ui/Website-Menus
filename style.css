@@ -364,6 +364,45 @@ input { font-size: 16px; }
 }
 .bet-hint b { color: var(--neon-cyan); }
 
+/* ============ MOBILE CONTROL BAR (THUMB ZONE) ============ */
+/* Hanya tampil di layar mobile; disembunyikan di desktop */
+#mobile-controls {
+  display: none;
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 45;
+  flex-direction: row;
+  gap: 10px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  background: linear-gradient(0deg, rgba(3,5,12,0.92), rgba(3,5,12,0.4));
+  backdrop-filter: blur(6px);
+  border-top: 1px solid var(--border-glow);
+}
+.mobile-btn {
+  flex: 1;
+  min-height: 56px;
+  border: none;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: clamp(14px, 3.6vw, 17px);
+  letter-spacing: 2px;
+  color: #fff;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.mobile-btn.launch {
+  background: linear-gradient(90deg, var(--neon-magenta), #7a2bff);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  text-shadow: 0 0 8px rgba(255,255,255,0.6);
+}
+.mobile-btn.stop {
+  background: linear-gradient(90deg, var(--neon-red), #ff7a3c);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+  animation: stopPulse 0.8s infinite;
+}
+
 /* ============ RESULT BANNER ============ */
 #result-banner {
   position: fixed;
@@ -435,8 +474,9 @@ input { font-size: 16px; }
 .modal-box {
   position: relative;
   width: min(420px, 94vw);
-  max-height: 88vh;
+  max-height: 85vh;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 28px 30px;
   background: var(--bg-panel-solid);
   border: 1px solid var(--neon-cyan);
@@ -644,6 +684,28 @@ input { font-size: 16px; }
 .admin-tab.danger:hover { background: rgba(255,59,92,0.1); }
 .admin-tab.ghost { margin-top: auto; color: var(--text-dim); }
 .admin-tab.ghost:hover { color: #fff; background: rgba(255,255,255,0.06); }
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--neon-red), #ff7a3c);
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 900;
+  box-shadow: 0 0 10px var(--neon-red);
+  animation: badgePulse 1.2s infinite;
+}
+@keyframes badgePulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
 
 .admin-content { flex: 1; padding: 22px 24px; overflow-y: auto; }
 .admin-section { display: none; }
@@ -960,7 +1022,7 @@ input { font-size: 16px; }
 
   /* Modal menjadi bottom-sheet, tidak menutupi seluruh layar */
   .modal-overlay { padding: 12px; align-items: flex-end; }
-  .modal-box { width: 100%; padding: 20px 18px; max-height: 92vh; }
+  .modal-box { width: 100%; padding: 20px 18px; max-height: 85vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .modal-box.wide { width: 100%; }
   .modal-title { font-size: 16px; margin-bottom: 14px; }
   .modal-desc { font-size: 13px; }
@@ -969,7 +1031,7 @@ input { font-size: 16px; }
   .btn-submit, .btn-ghost { padding: 12px; font-size: 13px; }
 
   /* Admin shell: sidebar horizontal */
-  .admin-shell { flex-direction: column; height: auto; max-height: 92vh; }
+  .admin-shell { flex-direction: column; height: auto; max-height: 85vh; }
   .admin-sidebar { width: 100%; flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid rgba(255,43,214,0.3); padding: 8px; gap: 4px; }
   .admin-brand { display: none; }
   .admin-tab { padding: 9px 10px; font-size: 10px; white-space: nowrap; }
@@ -1012,4 +1074,130 @@ input { font-size: 16px; }
   .bet-input-row { margin-bottom: 8px; }
   #welcome-screen .big-title { font-size: clamp(22px, 8vh, 36px); }
   #welcome-screen .big-cta { padding: 11px 22px; font-size: 12px; margin-top: 14px; }
+}
+
+/* ------------------------------------------------------------
+   EXTREME MOBILE RESPONSIVENESS (HP / layar kecil)
+   Media query agresif untuk device <= 768px.
+   DITARUH PALING BAWAH agar menang atas semua media query lain
+   ------------------------------------------------------------ */
+@media (max-width: 768px) {
+  html, body { font-size: 14px; }
+
+  /* NAVBAR: kompak, 2 baris, tidak menutupi kanvas */
+  #navbar { flex-wrap: wrap; padding: 8px 10px calc(6px + env(safe-area-inset-top)); gap: 6px; }
+  .logo-icon { font-size: 16px; }
+  .logo-text { font-size: clamp(12px, 3.6vw, 15px); letter-spacing: 1px; }
+  .nav-center { order: 3; width: 100%; justify-content: center; gap: 5px; }
+  .nav-btn { font-size: clamp(8px, 2.4vw, 10px); padding: 9px 8px; letter-spacing: 0.5px; }
+  .nav-btn.small { font-size: clamp(8px, 2.4vw, 10px); padding: 8px 7px; }
+  .icon-btn { width: 34px; height: 34px; font-size: 15px; }
+  #token-pill { padding: 5px 8px; gap: 4px; }
+  #token-balance, .token-ico { font-size: 12px; }
+  #user-name-label { font-size: 10px; }
+  .badge-admin { font-size: 8px; padding: 2px 5px; }
+
+  /* HUD: satu baris horizontal tepat di bawah navbar */
+  #hud {
+    top: calc(96px + env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(520px, 96vw);
+    flex-direction: row;
+    gap: 5px;
+  }
+  #hud > div { flex: 1; padding: 7px 8px; }
+  .hud-label { font-size: clamp(7px, 1.8vw, 9px); letter-spacing: 1px; margin-bottom: 3px; }
+  #danger-bar { height: 9px; }
+  #hud-dist-value { font-size: clamp(11px, 3vw, 13px); margin-top: 2px; }
+  .zone-tag { padding: 4px 7px; font-size: clamp(9px, 2.4vw, 11px); letter-spacing: 1px; }
+  .mult { font-size: clamp(15px, 4vw, 18px); }
+  #potential-win { font-size: clamp(9px, 2.2vw, 11px); margin-top: 2px; }
+
+  /* BET PANEL: naik agar tidak tertutup mobile-controls */
+  #bet-panel {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+    width: min(560px, 96vw);
+  }
+  .bet-box { padding: 10px 12px; }
+  .bet-title { font-size: clamp(11px, 3vw, 13px); letter-spacing: 1.5px; margin-bottom: 8px; }
+  .bet-input-row { gap: 5px; margin-bottom: 10px; }
+  .chip { padding: 10px 8px; font-size: clamp(9px, 2.4vw, 11px); flex: 1; text-align: center; }
+  #bet-input { padding: 10px 8px; font-size: 16px; min-width: 76px; flex: 1.4; }
+  .bet-hint { display: none; }
+
+  /* Tombol LUNCUR/BERHENTI DESKTOP disembunyikan; pakai thumb zone */
+  #bet-panel .bet-actions { display: none !important; }
+
+  /* THUMB ZONE: bar tombol tetap di bagian paling bawah */
+  #mobile-controls { display: flex; }
+  .mobile-btn { min-height: 58px; }
+
+  /* MODAL: tidak melebihi 85vh, bisa di-scroll rapi */
+  .modal-overlay { padding: 10px; align-items: flex-end; }
+  .modal-box {
+    width: 100%;
+    max-height: 85vh;
+    padding: 20px 16px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .modal-box.wide { width: 100%; }
+  .modal-title { font-size: clamp(14px, 4vw, 17px); letter-spacing: 2px; margin-bottom: 12px; }
+  .modal-desc { font-size: 12px; }
+  .modal-box label { font-size: 9px; letter-spacing: 1.5px; }
+  .modal-box input, .modal-box select { padding: 12px 10px; font-size: 16px; }
+  .modal-actions { flex-direction: column; gap: 8px; }
+  .btn-submit, .btn-ghost, .btn-danger { padding: 13px; font-size: 13px; }
+
+  /* RESULT BANNER: lebih kecil & tidak memakan layar */
+  #result-banner { top: 44%; }
+  #result-inner { padding: 16px 20px; }
+  #result-title { font-size: clamp(18px, 6vw, 22px); letter-spacing: 2px; }
+  #result-amount { font-size: clamp(16px, 5vw, 20px); }
+  #result-sub { font-size: 12px; }
+
+  /* ADMIN DASHBOARD: sidebar horizontal + konten scroll 85vh */
+  .admin-shell {
+    flex-direction: column;
+    width: 100%;
+    height: 85vh;
+    max-height: 85vh;
+  }
+  .admin-sidebar {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid rgba(255,43,214,0.3);
+    padding: 8px;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .admin-brand { display: none; }
+  .admin-tab { padding: 10px 9px; font-size: 9px; letter-spacing: 1px; white-space: nowrap; }
+  .admin-tab.ghost { margin-top: 0; }
+  .admin-content { padding: 12px 10px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .admin-section h2 { font-size: clamp(12px, 3.6vw, 15px); letter-spacing: 1.5px; }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .stat-card .num { font-size: clamp(20px, 6vw, 26px); }
+  .admin-table { font-size: 11px; }
+  .admin-table th, .admin-table td { padding: 8px 6px; }
+
+  /* WELCOME: tetap pas di tengah */
+  #welcome-screen .big-title { font-size: clamp(24px, 10vw, 40px); letter-spacing: 3px; }
+  #welcome-screen .big-sub { font-size: clamp(9px, 2.6vw, 12px); letter-spacing: 2px; }
+  #welcome-screen .big-cta { padding: 14px 24px; font-size: clamp(12px, 3.4vw, 14px); margin-top: 20px; }
+
+  /* TOAST */
+  #toast-container { top: calc(64px + env(safe-area-inset-top)); right: 8px; left: 8px; }
+  .toast { min-width: 0; max-width: 100%; font-size: 12px; padding: 11px 12px; }
+
+  /* LEADERBOARD / HISTORY lebih rapat */
+  .leader-row { flex-wrap: wrap; padding: 10px; }
+  .leader-stats { gap: 10px; font-size: 11px; }
+  .hist-row { flex-wrap: wrap; font-size: 12px; }
+  .req-item { font-size: 12px; }
+
+  .scanlines { display: none; }
 }

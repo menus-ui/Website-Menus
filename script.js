@@ -950,7 +950,7 @@ function finishRun(outcome) {
     Game.shakeAmp = 0.6;
     setStatusBadge('CRASHED');
     redFlash();
-    showCrashModal(mult, bet);
+    showResultModal(false, mult, bet);
   }
 
   S.saveUser(user);
@@ -1004,25 +1004,25 @@ function countUp(el, target, dur, opts = {}) {
   requestAnimationFrame(step);
 }
 
-function showVictoryModal(mult, win) {
-  $('#victory-title').innerHTML = '&#127881; PENERBANGAN SUKSES! <span class="win-tag">(WIN)</span>';
-  $('#victory-sub').textContent = 'PENARIKAN AMAN SEBELUM METEOR';
-  $('#victory-mult').textContent = fmtMult2(mult) + 'x';
-  $('#victory-count').textContent = '+0 TOKEN';
-  $('.victory-box').classList.remove('perfect');
-  openModal('victory-modal');
-  setTimeout(() => {
-    countUp($('#victory-count'), win, 1500, { fmt: (n) => '+' + fmt(Math.round(n)) + ' TOKEN' });
-  }, 300);
-}
+/* Pop-up result modal — wajib muncul setiap kali ronde berakhir.
+   win=true  -> mode MENANG (glow hijau/emas, +Token)
+   win=false -> mode KALAH (glow merah danger, -Token) */
+function showResultModal(win, multiplier, tokens) {
+  const modal = $('#result-modal');
+  modal.classList.remove('win', 'lose');
+  modal.classList.add(win ? 'win' : 'lose');
 
-function showCrashModal(crashMult, bet) {
-  $('#crash-mult-value').textContent = fmtMult2(crashMult) + 'x';
-  $('#crash-count').textContent = '-0 TOKEN';
-  openModal('crash-modal');
+  $('#modal-title').textContent = win ? '\u2728 PENERBANGAN SUKSES!' : '\u{1F4A5} CRASH!';
+  $('#modal-multiplier').innerHTML = 'Multiplier Terakhir: <b>' + fmtMult2(multiplier) + 'x</b>';
+
+  const tok = $('#modal-tokens');
+  tok.textContent = (win ? '+' : '-') + fmt(tokens) + ' TOKEN';
+  openModal('result-modal');
   setTimeout(() => {
-    countUp($('#crash-count'), bet, 1300, { fmt: (n) => '-' + fmt(Math.round(n)) + ' TOKEN' });
-  }, 300);
+    countUp(tok, tokens, 1200, {
+      fmt: (n) => (win ? '+' : '-') + fmt(Math.round(n)) + ' TOKEN'
+    });
+  }, 250);
 }
 
 function redFlash() {
@@ -1078,8 +1078,7 @@ function resetGameState() {
   clearParticles();
   setStatusBadge('');
   $('#result-banner').classList.add('hidden');
-  closeModal('victory-modal');
-  closeModal('crash-modal');
+  closeModal('result-modal');
   $('#btn-stop').classList.add('hidden');
   $('#btn-launch').classList.remove('hidden');
   $('#bet-title-label').textContent = 'TARUHAN TOKEN';
@@ -1094,7 +1093,7 @@ function triggerWinCelebration(mult, win) {
   floatingText(`+${fmt(win)} TOKEN (${fmtMult(mult)}x)`);
   spawnParticles(0xffd24a, 0x39ff8b, 220, 15, Game.astronaut.position, 3.8);
   Audio.celebration();
-  showVictoryModal(mult, win);
+  showResultModal(true, mult, win);
 }
 
 /* HUD hanya menampilkan multiplier dinamis & potensi menang — TANPA JARAK */
@@ -1768,7 +1767,7 @@ function bindUI() {
   });
   $$('.modal-overlay').forEach((ov) => {
     ov.addEventListener('click', (e) => {
-      if (e.target === ov) ov.classList.add('hidden');
+      if (e.target === ov && ov.id !== 'result-modal') ov.classList.add('hidden');
     });
   });
 
@@ -1814,9 +1813,7 @@ function bindUI() {
 
   $('#btn-replay').addEventListener('click', resetGameState);
 
-  $('#btn-victory-ok').addEventListener('click', resetGameState);
-
-  $('#btn-crash-ok').addEventListener('click', resetGameState);
+  $('#modal-close-btn').addEventListener('click', resetGameState);
 
   // Keyboard
   window.addEventListener('keydown', (e) => {

@@ -120,7 +120,7 @@ const S = {
         S.fbEnabled = true;
         S.saveUser(S.users[ADMIN_USER]); // pastikan admin tersedia di cloud
         S.watchUsers();
-        S.watchRequests();
+        S.watchTokenRequests();
       } catch (e) {
         console.warn('Firebase init gagal, mode lokal aktif.', e);
         S.fbEnabled = false;
@@ -158,14 +158,22 @@ const S = {
   pushRequest(req) {
     S.requests.push(req);
     S.persistLocal();
-    if (S.fbEnabled && S.root) S.root.ref('requests/' + req.id).set(req);
+    if (S.fbEnabled && S.root) {
+      S.root.ref('tokenRequests/' + req.id).set({
+        username: req.username,
+        amount: req.amount,
+        status: req.status,
+        date: req.date,
+        timestamp: Date.now()
+      });
+    }
   },
 
   updateRequest(id, patch) {
     const r = S.requests.find((x) => x.id === id);
     if (r) Object.assign(r, patch);
     S.persistLocal();
-    if (S.fbEnabled && S.root) S.root.ref('requests/' + id).update(patch);
+    if (S.fbEnabled && S.root) S.root.ref('tokenRequests/' + id).update(patch);
   },
 
   clearAll() {
@@ -174,7 +182,7 @@ const S = {
     S.persistLocal();
     if (S.fbEnabled && S.root) {
       S.root.ref('users').remove();
-      S.root.ref('requests').remove();
+      S.root.ref('tokenRequests').remove();
     }
   },
 
@@ -191,6 +199,19 @@ const S = {
   watchRequests() {
     S.root.ref('requests').on('value', (snap) => {
       S.requests = snap.val() ? Object.values(snap.val()) : [];
+      S.persistLocal();
+      onDataSync();
+    });
+  },
+
+  // Realtime Listener Firebase untuk permintaan token (tokenRequests/)
+  // Daftar request berstatus pending langsung muncul di dashboard admin secara real-time.
+  watchTokenRequests() {
+    S.root.ref('tokenRequests').on('value', (snap) => {
+      const raw = snap.val();
+      S.requests = raw
+        ? Object.keys(raw).map((k) => ({ id: k, ...raw[k] }))
+        : [];
       S.persistLocal();
       onDataSync();
     });
@@ -341,6 +362,16 @@ const Audio = {
   coins() {
     this.tone(988, 0.08, 'square', 0.1);
     setTimeout(() => this.tone(1319, 0.14, 'square', 0.12), 90);
+  },
+  celebration() {
+    const notes = [659.25, 783.99, 1046.5, 1318.5, 1568];
+    notes.forEach((n, i) => {
+      setTimeout(() => {
+        this.tone(n, 0.22, 'triangle', 0.2);
+        this.tone(n * 1.5, 0.18, 'sine', 0.08);
+      }, i * 120);
+    });
+    this.noise(1.2, 0.06, 'highpass', 6000, { slide: 10000 });
   }
 };
 
@@ -878,6 +909,7 @@ function finishRun(outcome) {
     showResult('SAFE STOP', 'Berhenti dengan aman sebelum meteor! Hadiah 2x lipat', win, 'win');
     spawnParticles(0x39ff8b, 0x00f0ff, 120, 9, Game.astronaut.position, 2.4);
     Game.shakeAmp = 0.1;
+    triggerWinCelebration(2, win);
   } else if (outcome === 'perfect') {
     const win = bet * 3;
     user.tokens += win;
@@ -890,6 +922,7 @@ function finishRun(outcome) {
     showResult('PERFECT STOP', 'Berhenti di detik terakhir! Bonus 3x lipat!', win, 'perfect');
     spawnParticles(0xffd24a, 0x39ff8b, 200, 12, Game.astronaut.position, 3);
     Game.shakeAmp = 0.18;
+    triggerWinCelebration(3, win);
   } else if (outcome === 'tooearly') {
     user.tokens += bet;
     user.stats.gamesPlayed++;
@@ -937,6 +970,57 @@ function showResult(title, sub, amount, cls) {
   $('#result-banner').classList.remove('hidden');
   clearTimeout(showResult._t);
   showResult._t = setTimeout(() => $('#result-banner').classList.add('hidden'), 5000);
+}
+
+/* ===================== VICTORY CELEBRATION ===================== */
+function screenFlash(color) {
+  const el = $('#screen-flash');
+  el.style.background = color;
+  el.classList.remove('on');
+  void el.offsetWidth;
+  el.classList.add('on');
+}
+
+function floatingText(text) {
+  const el = $('#float-text');
+  el.textContent = text;
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+}
+
+function countUp(el, target, dur) {
+  const start = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / dur);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = fmt(Math.round(target * eased));
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function showVictoryModal(mult, win) {
+  const isPerfect = mult >= 3;
+  $('#victory-title').innerHTML = isPerfect
+    ? '&#128081; PERFECT LANDING!'
+    : '&#128640; PENERBANGAN BERHASIL!';
+  $('#victory-sub').textContent = isPerfect ? 'WIN! PERFECT!' : 'WIN!';
+  $('#victory-mult').textContent = mult.toFixed(1).replace('.', ',') + 'x MULTIPLIER';
+  $('#victory-count').textContent = '0';
+  const box = $('.victory-box');
+  box.classList.toggle('perfect', isPerfect);
+  openModal('victory-modal');
+  setTimeout(() => countUp($('#victory-count'), win, 1400), 300);
+}
+
+// Efek selebrasi lengkap saat astronot selamat (Safe/Perfect)
+function triggerWinCelebration(mult, win) {
+  screenFlash(mult >= 3 ? 'rgba(255,210,74,0.4)' : 'rgba(57,255,139,0.32)');
+  floatingText(mult.toFixed(1).replace('.', ',') + 'x MULTIPLIER!');
+  spawnParticles(0xffd24a, 0xffffff, 170, 14, Game.astronaut.position, 3.4);
+  Audio.celebration();
+  showVictoryModal(mult, win);
 }
 
 /* HUD hanya menampilkan multiplier & potensi menang — TANPA JARAK */
@@ -1189,11 +1273,30 @@ function submitRequest() {
     toast('Masukkan jumlah token valid', 'error');
     return;
   }
-  S.pushRequest({ id: uid(), username: currentUser, amount, status: 'pending', date: nowStr() });
-  Audio.requestSent();
-  toast('Request token dikirim ke admin!', 'success');
+  requestToken(currentUser, amount);
   $('#request-amount').value = '';
   renderPlayerRequests();
+}
+
+// Push data request token ke node Firebase tokenRequests/ :
+// { username, amount, status: 'pending', timestamp: Date.now() }
+function requestToken(username, amount) {
+  const id = uid();
+  const req = { id, username, amount, status: 'pending', date: nowStr(), timestamp: Date.now() };
+  S.requests.push(req);
+  S.persistLocal();
+  if (S.fbEnabled && S.root) {
+    S.root.ref('tokenRequests/' + id).set({
+      username,
+      amount,
+      status: 'pending',
+      date: req.date,
+      timestamp: req.timestamp
+    });
+  }
+  Audio.requestSent();
+  toast('Permintaan token berhasil dikirim! Menunggu persetujuan Admin.', 'success');
+  return req;
 }
 
 /* ===================== ADMIN DASHBOARD ===================== */
@@ -1637,6 +1740,13 @@ function bindUI() {
   });
 
   $('#btn-replay').addEventListener('click', () => {
+    $('#result-banner').classList.add('hidden');
+    Game.state = 'IDLE';
+    resetRun();
+  });
+
+  $('#btn-victory-ok').addEventListener('click', () => {
+    closeModal('victory-modal');
     $('#result-banner').classList.add('hidden');
     Game.state = 'IDLE';
     resetRun();

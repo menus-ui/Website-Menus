@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kopi Gayo — Toko Kopi Nusantara</title>
+</head>
+<body>
+
+  <h1>Kopi Gayo</h1>
+
+  <!-- Atribut berkutip ganda, nesting rapi -->
+  <p>
+    Kopi <strong>Gayo</strong> tumbuh di dataran tinggi
+    <em>Aceh Tengah</em> pada ketinggian 1.200–1.700 mdpl.
+  </p>
+
+  <!-- Void element: tanpa tag penutup -->
+  <img src="img/biji-gayo.jpg" alt="Biji kopi Gayo yang baru dipanggang"
+       width="200" height="200">
+
+  <!-- Content model: anak langsung <ul> hanya boleh <li> -->
+  <ul>
+    <li>Aroma: rempah dan cokelat</li>
+    <li>Keasaman: sedang</li>
+    <li>Proses: semi-washed</li>
+  </ul>
+
+  <!-- Atribut boolean ditulis tanpa nilai -->
+  <form action="/pesan" method="post">
+    <label for="jumlah">Jumlah (kg)</label>
+    <input type="number" id="jumlah" name="jumlah" min="1" max="50" required>
+    <button type="submit">Pesan</button>
+  </form>
+
+</body>
+</html>
